@@ -1,7 +1,7 @@
-study_id,study_name,protocol_number,therapeutic_area,phase,indication_code,sponsor,target_enrollment,planned_start_date,planned_end_date,study_status,protocol_version
-CT-101,AURORA-1,CT-101-PROT-v1,Oncology,PHASE II,D004,Northwind Therapeutics,320,2025-07-14,2028-01-24,ACTIVE,v1.3
-CT-102,HELIOS-2,CT-102-PROT-v1,Cardiovascular,PHASE III,D001,Northwind Therapeutics,900,2025-03-16,2028-06-16,ACTIVE,v3.4
-CT-103,VERTEX-1,CT-103-PROT-v1,Immunology,PHASE II,D006,Northwind Therapeutics,240,2025-11-11,2027-09-02,ACTIVE,v2.2
-CT-104,MERIDIAN-3,CT-104-PROT-v3,Neurology,PHASE III,D005,Northwind Therapeutics,1200,2025-05-15,2028-04-05,ACTIVE,v1.1
-CT-105,SOLSTICE-1,CT-105-PROT-v1,Metabolic,PHASE I,D002,Northwind Therapeutics,120,2026-02-09,2027-05-17,ACTIVE,v2.4
-CT-106,ATLAS-2,CT-106-PROT-v2,Respiratory,PHASE II,D003,Northwind Therapeutics,800,2025-09-12,2027-11-13,ACTIVE,v3.2
+study_id,study_name,protocol_number,therapeutic_area,phase,indication_code,sponsor_id,target_enrollment,planned_start_date,planned_end_date,study_status,protocol_version
+CT-101,AURORA-1,CT-101-PROT-v1,Oncology,PHASE II,D004,SPN-01,320,2025-07-14,2028-01-24,ACTIVE,v1.3
+CT-102,HELIOS-2,CT-102-PROT-v1,Cardiovascular,PHASE III,D001,SPN-03,900,2025-03-16,2028-06-16,ACTIVE,v3.4
+CT-103,VERTEX-1,CT-103-PROT-v1,Immunology,PHASE II,D006,SPN-02,240,2025-11-11,2027-09-02,ACTIVE,v2.2
+CT-104,MERIDIAN-3,CT-104-PROT-v3,Neurology,PHASE III,D005,SPN-01,1200,2025-05-15,2028-04-05,ACTIVE,v1.1
+CT-105,SOLSTICE-1,CT-105-PROT-v1,Metabolic,PHASE I,D002,SPN-03,120,2026-02-09,2027-05-17,ACTIVE,v2.4
+CT-106,ATLAS-2,CT-106-PROT-v2,Respiratory,PHASE II,D003,SPN-02,800,2025-09-12,2027-11-13,ACTIVE,v3.2
