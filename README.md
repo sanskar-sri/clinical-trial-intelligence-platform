@@ -1015,3 +1015,311 @@ Gold
 
 The next implementation milestone is the creation of the Bronze schema and the
 first incremental ingestion pipeline for `EDC/subjects`.
+
+
+
+## Implementation Progress
+
+### Phase 1 — Bronze EDC Subject Ingestion ✅
+
+The first production ingestion pipeline has been implemented for the EDC subject feed.
+
+#### Source
+
+Clinical subject data is delivered as CSV files to the AWS S3 landing zone:
+
+s3://clinical-trial-intelligence-platform-sk/Landing/EDC/subjects/
+
+#### Ingestion Architecture
+
+The EDC subject feed is ingested using Databricks Auto Loader through a Lakeflow Declarative Pipeline.
+
+AWS S3 Landing Zone
+        │
+        │ CSV files
+        ▼
+Databricks Auto Loader
+        │
+        │ cloudFiles
+        ▼
+Lakeflow Declarative Pipeline
+clinical-trial-bronze-v2
+        │
+        ▼
+Unity Catalog
+clinical_trial_intelligence
+        │
+        └── bronze
+              │
+              └── edc_subjects
+
+Auto Loader is configured with managed file events to support incremental discovery of files arriving in the S3 landing location.
+
+#### Pipeline Source Code
+
+The production pipeline definition is maintained in the Git-backed project structure:
+
+src/
+└── pipelines/
+    └── bronze/
+        └── edc_subjects.py
+
+The pipeline uses the `pyspark.pipelines` API and defines `edc_subjects` as a streaming table.
+
+The Bronze layer preserves the source records while adding ingestion and lineage metadata:
+
+- `_source_file`
+- `_source_file_name`
+- `_source_file_modification_ts`
+- `_ingestion_ts`
+- `_ingestion_date`
+
+These fields provide traceability from a Bronze record back to the original vendor file.
+
+#### Unity Catalog Destination
+
+Catalog:
+
+clinical_trial_intelligence
+
+Schema:
+
+bronze
+
+Streaming table:
+
+clinical_trial_intelligence.bronze.edc_subjects
+
+#### Pipeline Validation
+
+The pipeline was first executed using a validation-only dry run.
+
+Result:
+
+- Pipeline graph successfully resolved
+- S3 Auto Loader source successfully detected
+- `edc_subjects` streaming table successfully resolved
+- 0 validation errors
+- 0 validation warnings
+
+The production pipeline was then executed successfully using a full refresh.
+
+Pipeline:
+
+clinical-trial-bronze-v2
+
+Status:
+
+Completed
+
+#### Ingestion Validation
+
+The Bronze table was validated directly through Databricks SQL:
+
+SELECT COUNT(*) AS total_records
+FROM clinical_trial_intelligence.bronze.edc_subjects;
+
+Result:
+
+3,829 records
+
+This confirms the successful end-to-end flow:
+
+S3 Landing
+    → Auto Loader
+    → Lakeflow Declarative Pipeline
+    → Unity Catalog
+    → Bronze streaming table
+
+### Current Project Status
+
+| Component | Status |
+|---|---|
+| AWS S3 landing zone | ✅ Configured |
+| Databricks access to S3 | ✅ Configured |
+| Unity Catalog | ✅ Configured |
+| `clinical_trial_intelligence` catalog | ✅ Created |
+| `bronze` schema | ✅ Created |
+| EDC subjects Auto Loader pipeline | ✅ Implemented |
+| Pipeline dry-run validation | ✅ Passed |
+| Bronze pipeline execution | ✅ Passed |
+| `bronze.edc_subjects` | ✅ Created |
+| Initial EDC subject ingestion | ✅ 3,829 records |
+| Incremental new-file test | ⏳ Next |
+| Remaining Bronze feeds | ⏳ Pending |
+| Silver transformations | ⏳ Pending |
+| Data-quality quarantine | ⏳ Pending |
+| Gold KPI layer | ⏳ Pending |
+
+### Pipeline Ownership and Catalog Resolution
+
+During the initial Bronze pipeline deployment, the pipeline failed with:
+
+PERMISSION_DENIED: Can not move tables across arclight catalogs
+
+The issue occurred after changing the pipeline's target catalog/schema after
+pipeline-managed state had already been established.
+
+Rather than attempting to move the existing pipeline-managed streaming table
+across catalog boundaries, a new pipeline was created with the correct Unity
+Catalog destination from initialization:
+
+Pipeline: clinical-trial-bronze-v2
+Catalog: clinical_trial_intelligence
+Schema: bronze
+
+The new pipeline successfully initialized and created:
+
+clinical_trial_intelligence.bronze.edc_subjects
+
+This highlighted an important governance consideration: Lakeflow pipeline
+datasets are associated with pipeline identity/state, target catalog/schema,
+and the run-as identity. Catalog and ownership configuration should therefore
+be established correctly when the pipeline is created.
+
+
+Yes. This is worth documenting because it shows an architectural decision, not merely that you know how to ingest CSVs.
+
+I would put this in your project README as a dedicated section explaining why Bronze intentionally uses two ingestion semantics.
+
+Bronze Layer — Source-Aware Ingestion Strategy
+
+The Bronze layer of the Clinical Trial Intelligence Platform is designed to preserve source data while selecting the ingestion pattern according to the change behavior of each clinical data domain.
+
+Rather than treating every S3 source identically, the pipeline distinguishes between:
+
+* frequently arriving, append-oriented operational data, and
+* infrequently changing reference/snapshot data.
+
+This distinction determines whether a source is represented as a Streaming Table or a Materialized View in Databricks Lakeflow Declarative Pipelines.
+
+Databricks recommends streaming tables for continuously or incrementally growing sources, whereas materialized views are appropriate when results need to reflect the current state of source data, including sources that may change rather than simply append.  
+
+Architecture
+
+                         AWS S3 LANDING
+                               │
+              ┌────────────────┴─────────────────┐
+              │                                  │
+              │                                  │
+     FREQUENT / APPEND DATA             REFERENCE / SNAPSHOT DATA
+              │                                  │
+              ▼                                  ▼
+       STREAMING TABLES                  MATERIALIZED VIEWS
+              │                                  │
+       ┌──────┴───────┐                 ┌────────┴──────────┐
+       │              │                 │                   │
+   edc_subjects   edc_visits       ctms_studies       ctms_sites
+   lab_results                     master_institutions
+   safety_adverse_events           master_products
+                                   master_sponsors
+                                   protocol_study_arms
+
+Bronze Dataset Classification
+
+Source Domain	Dataset	Bronze Object	Rationale
+EDC	edc_subjects	Streaming Table	Subject records arrive incrementally
+EDC	edc_visits	Streaming Table	Visit/activity records accumulate over time
+Lab	lab_results	Streaming Table	New laboratory observations arrive incrementally
+Safety	safety_adverse_events	Streaming Table	Adverse-event records are operational/event-oriented
+CTMS	ctms_studies	Materialized View	Study metadata behaves primarily as reference/current-state data
+CTMS	ctms_sites	Materialized View	Site metadata is relatively slow-changing reference data
+Master	master_institutions	Materialized View	Reference/master dataset
+Master	master_products	Materialized View	Reference/master dataset
+Master	master_sponsors	Materialized View	Reference/master dataset
+Protocol	protocol_study_arms	Materialized View	Protocol configuration/reference data
+
+Streaming Ingestion
+
+Frequently arriving operational datasets are ingested from S3 using Databricks Auto Loader and represented as streaming tables.
+
+Example:
+
+from pyspark import pipelines as dp
+from pyspark.sql.functions import current_timestamp, current_date
+SOURCE_PATH = (
+    "s3://clinical-trial-intelligence-platform-sk/"
+    "Landing/EDC/subjects/"
+)
+@dp.table(
+    name="edc_subjects",
+    comment="Raw EDC subject records incrementally ingested from S3 Landing."
+)
+def edc_subjects():
+    return (
+        spark.readStream
+        .format("cloudFiles")
+        .option("cloudFiles.format", "csv")
+        .option("header", "true")
+        .option("cloudFiles.inferColumnTypes", "true")
+        .option("cloudFiles.useManagedFileEvents", "true")
+        .load(SOURCE_PATH)
+        .selectExpr(
+            "*",
+            "_metadata.file_path AS _source_file",
+            "_metadata.file_name AS _source_file_name",
+            "_metadata.file_modification_time AS _source_file_modification_ts"
+        )
+        .withColumn("_ingestion_ts", current_timestamp())
+        .withColumn("_ingestion_date", current_date())
+    )
+
+This pattern allows new files to be processed incrementally rather than repeatedly treating the complete historical source as a new batch. Streaming tables are specifically intended for incremental processing of growing datasets.  
+
+Snapshot / Reference Ingestion
+
+Reference datasets use materialized views because their primary requirement is to expose the current source state, rather than process a continuously growing event stream.
+
+Lakeflow materialized views use batch semantics while Databricks can incrementally maintain their results where possible.  
+
+The project therefore avoids forcing master/reference datasets into a streaming model simply because the source files reside in S3.
+
+Bronze Lineage Metadata
+
+Operational Bronze ingestion also retains technical metadata such as:
+
+_source_file
+_source_file_name
+_source_file_modification_ts
+_ingestion_ts
+_ingestion_date
+
+These fields provide source traceability and support downstream debugging, reconciliation, auditability, and data-quality investigation.
+
+⸻
+
+Engineering Decision: Dataset Type Migration
+
+During development, all Bronze datasets were initially implemented as streaming tables.
+
+After analyzing the update characteristics of each source, the design was revised to separate append-oriented operational feeds from reference/snapshot datasets.
+
+The resulting architecture uses:
+
+4 Streaming Tables
++
+6 Materialized Views
+=
+10 Bronze datasets
+
+An important implementation constraint was discovered during this migration: an existing pipeline dataset could not simply be changed from a streaming table to a materialized view while retaining the existing object. The previous dataset objects had to be removed before the pipeline could recreate them using the new dataset semantics.
+
+This reinforced an important design principle:
+
+Dataset type should be determined by source change semantics and downstream requirements, not simply by the storage system from which the data is read.
+
+Lakeflow pipelines support both streaming tables and materialized views as first-class datasets, and the pipeline resolves their dependencies and execution order declaratively.  
+
+Why this is a strong project point
+
+This is something I would absolutely keep for your Data Engineer interview discussion. Don’t describe it merely as:
+
+“I created streaming tables and materialized views.”
+
+The stronger explanation is:
+
+“I initially modeled all S3 sources as streaming tables, but after profiling the source update patterns, I separated operational append-oriented datasets from slower-changing reference datasets. EDC subjects, visits, labs, and safety events use incremental streaming ingestion, while CTMS, master, and protocol reference datasets use materialized views. This avoided unnecessary streaming semantics for snapshot-style sources while retaining incremental ingestion where it provides value.”
+
+That demonstrates source profiling → architectural decision → implementation → migration issue → resolution, which is considerably stronger than simply listing Databricks as a technology on the resume.
+
+And later, when we build Silver, this decision becomes even more useful: Silver can handle schema enforcement, deduplication, business-rule validation, referential/data-quality checks and cross-domain integration before Gold produces the clinical intelligence models. Databricks’ own medallion guidance places ingestion in Bronze, cleaning/integration in Silver, and dimensional/fact modeling in Gold.  
