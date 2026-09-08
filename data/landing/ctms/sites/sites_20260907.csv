@@ -1,0 +1,46 @@
+site_id,study_id,site_name,country,city,principal_investigator,target_subjects,activation_date,site_status
+S0001,CT-101,Bengaluru Clinical Research Center,India,Hyderabad,Dr. Wong,53,2025-07-21,ACTIVE
+S0002,CT-101,Pune Clinical Research Center,India,Mumbai,Dr. Ferreira,53,2025-07-27,ACTIVE
+S0003,CT-101,Boston Clinical Research Center,United States,Phoenix,Dr. Iyer,53,2025-09-28,ACTIVE
+S0004,CT-101,Houston Clinical Research Center,United States,Chicago,Dr. Yamada,53,2025-08-03,ACTIVE
+S0005,CT-101,Pune Clinical Research Center,India,Chennai,Dr. Iyer,53,2025-07-26,ACTIVE
+S0006,CT-101,Madrid Clinical Research Center,Spain,Valencia,Dr. Hoffmann,53,2025-08-10,ACTIVE
+S0007,CT-102,Johannesburg Clinical Research Center,South Africa,Johannesburg,Dr. Ueda,75,2025-05-21,ACTIVE
+S0008,CT-102,Warsaw Clinical Research Center,Poland,Gdansk,Dr. Chen,75,2025-03-16,ACTIVE
+S0009,CT-102,Durham Clinical Research Center,United States,Chicago,Dr. Ueda,75,2025-05-29,ACTIVE
+S0010,CT-102,Berlin Clinical Research Center,Germany,Munich,Dr. Quintana,75,2025-04-28,ACTIVE
+S0011,CT-102,Pune Clinical Research Center,India,Mumbai,Dr. Okonkwo,75,2025-04-02,ACTIVE
+S0012,CT-102,Nagoya Clinical Research Center,Japan,Osaka,Dr. Quintana,75,2025-04-26,ACTIVE
+S0013,CT-102,Durham Clinical Research Center,United States,Chicago,Dr. Lindqvist,75,2025-05-30,ACTIVE
+S0014,CT-102,Hyderabad Clinical Research Center,India,Hyderabad,Dr. Nakamura,75,2025-06-13,CLOSED
+S0015,CT-102,Gdansk Clinical Research Center,Poland,Warsaw,Dr. Eriksen,75,2025-04-29,ACTIVE
+S0016,CT-102,Sydney Clinical Research Center,Australia,Melbourne,Dr. Ueda,75,2025-05-09,ACTIVE
+S0017,CT-102,Pune Clinical Research Center,India,Bengaluru,Dr. Iyer,75,2025-05-24,ACTIVE
+S0018,CT-102,Chennai Clinical Research Center,India,Mumbai,Dr. Ferreira,75,2025-04-28,ACTIVE
+S0019,CT-103,Porto Alegre Clinical Research Center,Brazil,Porto Alegre,Dr. Quintana,40,2026-01-28,ACTIVE
+S0020,CT-103,Pune Clinical Research Center,India,Pune,Dr. Chen,40,2026-02-08,ACTIVE
+S0021,CT-103,Hyderabad Clinical Research Center,India,Mumbai,Dr. Mehta,40,2025-12-10,ACTIVE
+S0022,CT-103,Rio de Janeiro Clinical Research Center,Brazil,Porto Alegre,Dr. Hoffmann,40,2026-01-20,ACTIVE
+S0023,CT-103,Manchester Clinical Research Center,United Kingdom,Leeds,Dr. Tanaka,40,2026-01-13,ACTIVE
+S0024,CT-103,Warsaw Clinical Research Center,Poland,Gdansk,Dr. Ferreira,40,2026-01-20,ACTIVE
+S0025,CT-104,Manchester Clinical Research Center,United Kingdom,Leeds,Dr. Lindqvist,100,2025-08-11,ACTIVE
+S0026,CT-104,Cologne Clinical Research Center,Germany,Munich,Dr. Silva,100,2025-07-26,ACTIVE
+S0027,CT-104,Leeds Clinical Research Center,United Kingdom,London,Dr. Chen,100,2025-08-08,ACTIVE
+S0028,CT-104,Johannesburg Clinical Research Center,South Africa,Johannesburg,Dr. Kowalski,100,2025-08-12,ACTIVE
+S0029,CT-104,Valencia Clinical Research Center,Spain,Valencia,Dr. Jansen,100,2025-05-22,ACTIVE
+S0030,CT-104,Manchester Clinical Research Center,United Kingdom,Manchester,Dr. Zielinski,100,2025-07-13,ACTIVE
+S0031,CT-104,Cape Town Clinical Research Center,South Africa,Cape Town,Dr. Kowalski,100,2025-06-30,ACTIVE
+S0032,CT-104,Melbourne Clinical Research Center,Australia,Melbourne,Dr. Chen,100,2025-08-08,ACTIVE
+S0033,CT-104,Berlin Clinical Research Center,Germany,Munich,Dr. Nakamura,100,2025-08-04,ACTIVE
+S0034,CT-104,Rio de Janeiro Clinical Research Center,Brazil,Sao Paulo,Dr. Ueda,100,2025-07-10,ACTIVE
+S0035,CT-104,Nagoya Clinical Research Center,Japan,Osaka,Dr. Bauer,100,2025-07-02,ACTIVE
+S0036,CT-104,Leeds Clinical Research Center,United Kingdom,Leeds,Dr. Tanaka,100,2025-07-29,ACTIVE
+S0037,CT-105,Melbourne Clinical Research Center,Australia,Sydney,Dr. Varga,40,2026-03-17,ACTIVE
+S0038,CT-105,Porto Alegre Clinical Research Center,Brazil,Sao Paulo,Dr. Chen,40,2026-04-11,ACTIVE
+S0039,CT-105,Johannesburg Clinical Research Center,South Africa,Johannesburg,Dr. Silva,40,2026-02-18,ACTIVE
+S0040,CT-106,Warsaw Clinical Research Center,Poland,Krakow,Dr. Kowalski,133,2025-10-23,ACTIVE
+S0041,CT-106,Cologne Clinical Research Center,Germany,Hamburg,Dr. Dasgupta,133,2025-10-15,ACTIVE
+S0042,CT-106,London Clinical Research Center,United Kingdom,Manchester,Dr. Kowalski,133,2025-10-04,CLOSED
+S0043,CT-106,Chicago Clinical Research Center,United States,Houston,Dr. Jansen,133,2025-11-21,ACTIVE
+S0044,CT-106,Gdansk Clinical Research Center,Poland,Warsaw,Dr. Ferreira,133,2025-10-24,ACTIVE
+S0045,CT-106,Munich Clinical Research Center,Germany,Berlin,Dr. Quintana,133,2025-11-15,ACTIVE
