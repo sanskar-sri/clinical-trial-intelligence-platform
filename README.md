@@ -1,743 +1,1017 @@
-# clinical-trial-intelligence-platform
+# Clinical Trial Intelligence Platform
 
-EDC     → Electronic Data Capture
-          Patient/subject + visit data
+A cloud-based data engineering platform for ingesting, processing, governing,
+and analyzing clinical-trial data from multiple operational source systems.
 
-CTMS    → Clinical Trial Management System
-          Study + site management data
+The platform uses AWS S3 as the cloud data lake and Databricks as the
+data-processing, governance, and analytics platform.
 
-LAB     → Laboratory System
-          Lab test results
+---
 
-SAFETY  → Safety / Pharmacovigilance System
-          Adverse-event data
+# Source Systems
 
+The platform simulates data arriving from multiple clinical-trial operational
+systems.
 
-README Notes
+| Source | Description | Example Data |
+|---|---|---|
+| EDC | Electronic Data Capture | Patient/subject and visit data |
+| CTMS | Clinical Trial Management System | Study and site-management data |
+| LAB | Laboratory System | Laboratory test results |
+| SAFETY | Safety / Pharmacovigilance System | Adverse-event data |
 
-You can put this section directly into your project README.
+The S3 Landing layer is organized by source system and dataset so that
+individual datasets can be ingested independently.
 
-AWS S3 – Databricks Unity Catalog Integration
+Example:
 
-The project uses Amazon S3 as the cloud object-storage layer and Databricks as the data-processing and analytics platform. Access between Databricks and S3 is implemented through AWS IAM roles and Unity Catalog Storage Credentials instead of static AWS access keys.
+```text
+Landing/
+├── EDC/
+│   ├── subjects/
+│   └── visits/
+├── CTMS/
+├── LAB/
+├── SAFETY/
+├── master/
+└── protocol/
+```
 
-Resources created
+---
 
-S3 Bucket
+# Target Platform Architecture
+
+```text
+Clinical Trial Source Systems
+       │
+       ├── EDC
+       ├── CTMS
+       ├── LAB
+       └── SAFETY
+       │
+       ▼
+Amazon S3
+       │
+       ▼
+Landing Layer
+       │
+       ▼
+Databricks Auto Loader
+       │
+       ▼
+Bronze Delta
+       │
+       ▼
+Silver Delta
+       │
+       ▼
+Gold Delta
+       │
+       ▼
+Analytics / Dashboard / Serving
+```
+
+The platform follows a medallion-style architecture.
+
+```text
+Landing → Bronze → Silver → Gold
+```
+
+The Landing layer preserves source files.
+
+Bronze will provide the first persistent Delta representation of the source
+data with minimal transformation.
+
+Silver will contain cleaned, validated, standardized, and integrated data.
+
+Gold will contain analytics-ready business datasets and metrics.
+
+---
+
+# AWS S3 Data Lake
+
+An Amazon S3 bucket was created as the cloud object-storage layer for the
+platform.
+
+```text
+Bucket:
+clinical-trial-intelligence-platform-sk
+```
+
+The raw ingestion area is:
+
+```text
+s3://clinical-trial-intelligence-platform-sk/Landing/
+```
+
+Source data is organized into domain-specific prefixes beneath the Landing
+layer.
+
+Example validated dataset:
+
+```text
+s3://clinical-trial-intelligence-platform-sk/Landing/EDC/subjects/
+```
+
+Multiple date/source files can exist under a dataset path, allowing the
+ingestion pipeline to process new files incrementally.
+
+---
+
+# AWS S3 – Databricks Unity Catalog Integration
+
+Secure access between Databricks and Amazon S3 is implemented using AWS IAM
+roles and Databricks Unity Catalog Storage Credentials.
+
+Permanent AWS access keys and secret keys are not embedded in notebooks or
+application code.
+
+## Resources Created
+
+```text
+AWS S3 Bucket
 └── clinical-trial-intelligence-platform-sk
-IAM Role
+
+AWS IAM Role
 └── databricks-clinical-trial-s3-role
-IAM Policy
+
+AWS IAM Policy
 └── databricks-clinical-trial-s3-policy
+
 Databricks Storage Credential
 └── clinical_trial_s3_credential
 
-Authentication flow
+Databricks External Location
+└── clinical_trial_s3
 
+Unity Catalog
+└── clinical_trial_intelligence
+```
+
+---
+
+# Authentication Architecture
+
+```text
 Databricks
      │
      │ Unity Catalog Storage Credential
-     ↓
+     ▼
 AWS STS AssumeRole
      │
-     ↓
+     │ External ID validation
+     ▼
 AWS IAM Role
      │
-     │ S3 IAM Permissions
-     ↓
+     │ IAM Permission Policy
+     ▼
 Amazon S3
+```
 
-The IAM trust relationship authorizes the Databricks Unity Catalog principal to assume the project IAM role using AWS STS. A Databricks-generated External ID is included in the trust relationship to restrict role assumption to the intended Unity Catalog credential.
+The IAM trust relationship authorizes the Databricks Unity Catalog AWS
+principal to assume the project IAM role using AWS STS.
 
-The IAM permission policy grants the role access only to the required S3 resources. No permanent AWS access key or secret access key is stored in Databricks notebooks or source code.
+A Databricks-generated External ID is included in the trust relationship to
+restrict role assumption to the intended Unity Catalog credential.
 
-Validation status
+The IAM permissions policy determines which AWS resources and operations are
+available after the role has been assumed.
 
-Assume Role            PASS
-External ID Condition  PASS
-Self Assume Role       FAIL
+---
 
-The initial validation confirmed that cross-account role assumption and External ID verification were configured successfully. Validation identified one remaining configuration issue: the IAM role must explicitly support self-assumption. The trust policy is being updated to include the IAM role itself as a trusted principal before final credential validation.
+# IAM Security Model
 
-⸻
+An important distinction in the integration is:
 
-Important interview learning from this step
+```text
+IAM Trust Policy
+       │
+       └── Who can assume the role?
 
-The strongest thing to remember isn’t the console clicks. It’s this:
+IAM Permission Policy
+       │
+       └── What can the role access?
+```
 
-IAM Permission Policy = what the role can access.
-IAM Trust Policy = who can assume the role.
+For this architecture:
 
-And in your particular architecture:
-
-S3 Policy
-   ↓
-"What can Databricks do?"
-List/Get/Put S3 objects
-Trust Policy
-   ↓
-"Who can become this role?"
-Databricks Unity Catalog + role itself
-External ID
-   ↓
-"Is this the intended Databricks credential?"
-
-That is a much stronger explanation in a Data Engineer interview than saying, “I connected Databricks with S3.”
-
-Your current error is also worth retaining in the README as a Troubleshooting / Engineering Challenges entry rather than hiding it. It demonstrates that you validated the security configuration, isolated the failing IAM mechanism, and corrected the trust relationship rather than simply granting broader permissions.  
-
-Next: fix only the Self Assume Role check. Once that becomes green, we’ll document the final successful state and move to External Location → S3 path → Bronze ingestion.
-
-
-## Troubleshooting: Databricks External Location File Events Failure
-
-### Problem
-
-While configuring an AWS S3 External Location in Databricks Unity Catalog, 
-the storage credential and basic S3 connectivity were successfully validated.
-
-The following checks passed:
-
-- Read: Success
-- List: Success
-- Write: Success
-- Delete: Success
-- Path Exists: Success
-- Assume Role: Success
-- Self Assume Role: Success
-- External ID Condition: Success
-
-However, two validations failed:
-
-- File Events Resource Provision
-- File Events Resource Teardown
-
-Databricks returned an AccessDenied / 403 error indicating that the IAM role
-was not authorized to perform:
-
-s3:GetBucketNotification
-
-### Root Cause
-
-The IAM role had sufficient permissions for normal S3 data operations such as
-reading, writing, listing, and deleting objects.
-
-However, Databricks Automatic File Events requires additional AWS permissions
-to inspect/configure S3 event notifications and provision the supporting
-event infrastructure.
-
-Therefore:
-
-S3 access was working correctly.
-
-The failure was specifically related to the event-driven ingestion capability,
-not the basic Databricks-to-S3 connection.
-
-### Investigation
-
-Instead of assuming that the entire S3 integration had failed, I examined each
-validation result independently.
-
-This showed that:
-
-Databricks -> IAM Role        = Working
-IAM Role -> S3               = Working
-External ID validation       = Working
-Read/Write/Delete/List       = Working
-File Event configuration     = Failing
-
-The error message identified the missing permission:
-
-s3:GetBucketNotification
-
-This isolated the problem to IAM permissions required for file-event
-configuration.
-
-### Resolution
-
-The IAM policy attached to the Databricks storage role needed to be extended
-with the permissions required for Databricks file events.
-
-The existing S3 permissions were retained because they were already working.
-
-The additional permissions enable Databricks to work with the S3 notification
-configuration and the AWS resources used for file-event processing.
-
-### Why I Did Not Immediately Use "Force Create"
-
-Databricks provided a "Force create" option because file events are not
-mandatory for basic external-location access.
-
-However, forcing creation would cause Databricks to fall back to directory
-listing for file discovery.
-
-For this project, I chose to investigate the IAM failure because the target
-architecture is intended to support scalable and event-driven ingestion.
-
-### Architecture Lesson
-
-Basic storage access and event-driven ingestion require different permission
-sets.
-
-Basic access:
-
+```text
 Databricks
-    |
-    v
+     │
+     │ STS AssumeRole
+     ▼
+IAM Trust Policy
+     │
+     │ validates principal + External ID
+     ▼
 IAM Role
-    |
-    v
-S3
-    |
-    +-- List
-    +-- Read
-    +-- Write
-    +-- Delete
+     │
+     │ IAM Permission Policy
+     ▼
+S3 / SNS / SQS
+```
 
-Event-driven ingestion:
+Authentication and authorization therefore represent separate layers of the
+integration.
 
-S3
- |
- +-- File arrival
- |
- v
-AWS event infrastructure
- |
- v
-Databricks / Auto Loader
+Successful `AssumeRole` does not automatically prove that the assumed role
+has permission to access the required S3 objects.
 
-A successful S3 read/write test therefore does not automatically mean that
-file-event functionality is correctly configured.
+---
 
+# Databricks Storage Credential
 
-## Amazon Leadership Principle Story — Databricks S3 Integration Failure
+The following Unity Catalog Storage Credential was created:
 
-### Leadership Principles
-
-Primary:
-- Dive Deep
-- Ownership
-
-Supporting:
-- Learn and Be Curious
-- Insist on the Highest Standards
-
-### Situation
-
-While building a clinical-trial data platform using AWS S3 and Databricks,
-I configured a Unity Catalog storage credential and external location.
-
-The IAM role assumption, External ID validation, and S3 read/write/list/delete
-operations were successful, but Databricks failed while provisioning automatic
-file-event resources.
-
-### Task
-
-I needed to determine whether the problem was with the overall S3 integration
-or with a specific component of the architecture, while avoiding unnecessary
-changes to permissions that were already working.
-
-### Action
-
-I analyzed the Databricks validation results individually instead of treating
-the validation as a single pass/fail test.
-
-I confirmed that:
-
-1. Databricks could assume the AWS IAM role.
-2. Self-assume configuration was working.
-3. The External ID condition was correct.
-4. Databricks could read, list, write, and delete S3 objects.
-5. Only File Events Resource Provision and Teardown were failing.
-
-I then examined the AWS error and identified the missing
-`s3:GetBucketNotification` capability.
-
-This demonstrated that the problem was isolated to permissions required for
-file-event configuration rather than the S3 connection itself.
-
-Instead of bypassing the issue using "Force create", I decided to correct the
-IAM configuration so that the architecture could support event-driven file
-discovery.
-
-### Result
-
-The troubleshooting process isolated the failure without disrupting the
-working S3 integration and identified the exact IAM capability that needed to
-be corrected.
-
-More importantly, I learned to separate:
-
-Authentication
-        ↓
-Authorization
-        ↓
-Storage access
-        ↓
-Event infrastructure
-
-when debugging cross-cloud-service integrations.
-
-Most of the validation checks were green, so I did not treat it as a generic S3 connectivity failure. I decomposed the integration layer by layer, identified that only the event-provisioning path was failing, traced the AWS 403 to a specific IAM permission, and chose to fix the underlying configuration rather than bypassing it with Force Create.
-
-This makes the architecture easier to troubleshoot and supports a more
-production-oriented ingestion design.
-
-docs/
-└── troubleshooting/
-    ├── databricks-storage-credential-success.png
-    ├── external-location-file-events-failure.png
-    └── external-location-file-events-success.png
-
-
-
-    Absolutely. Since you want this for your GitHub README and interview preparation, I would document both the successful implementation and the failures you debugged. You can paste the following directly into your README.
-
-AWS S3 Integration with Databricks Unity Catalog
-
-Objective
-
-Configured secure access between AWS S3 and Databricks Unity Catalog using an AWS IAM role and a Databricks Storage Credential. The objective was to allow Databricks to securely read and write clinical-trial data stored in the S3 landing layer without storing long-lived AWS access keys inside Databricks.
-
-Architecture
-
-                    AWS
-                     │
-                     ▼
-        ┌─────────────────────────┐
-        │       S3 Bucket         │
-        │ clinical-trial-         │
-        │ intelligence-platform-sk│
-        └────────────┬────────────┘
-                     │
-                  Landing/
-                     │
-                     ▼
-        ┌─────────────────────────┐
-        │      AWS IAM Role       │
-        │ databricks-clinical-    │
-        │ trial-s3-role           │
-        └────────────┬────────────┘
-                     │
-          STS AssumeRole
-          + External ID
-                     │
-                     ▼
-        ┌─────────────────────────┐
-        │ Databricks Storage      │
-        │ Credential              │
-        │ clinical_trial_s3_      │
-        │ credential              │
-        └────────────┬────────────┘
-                     │
-                     ▼
-        ┌─────────────────────────┐
-        │ Unity Catalog External  │
-        │ Location                │
-        │ clinical_trial_s3       │
-        └────────────┬────────────┘
-                     │
-                     ▼
-s3://clinical-trial-intelligence-platform-sk/Landing/
-
-Implementation
-
-An AWS IAM role named databricks-clinical-trial-s3-role was created specifically for Databricks access.
-
-The IAM trust relationship was configured so that the Databricks Unity Catalog AWS principal could assume the role using AWS STS. An External ID condition was included in the trust policy to restrict role assumption to the intended Databricks storage credential.
-
-The IAM permissions were scoped to the project S3 bucket and included the S3 operations required for data access:
-
-s3:GetObject
-s3:PutObject
-s3:DeleteObject
-s3:ListBucket
-s3:GetBucketLocation
-s3:ListBucketMultipartUploads
-s3:ListMultipartUploadParts
-s3:AbortMultipartUpload
-
-Additional S3/SNS/SQS permissions were configured to support Databricks-managed file events.
-
-In Databricks, the following Storage Credential was created:
-
+```text
 Storage Credential:
 clinical_trial_s3_credential
-Authentication:
+
+Credential Type:
 AWS IAM Role
+```
 
-The Storage Credential was then mapped to the S3 landing path through a Unity Catalog External Location:
+The credential references the AWS IAM role used by Databricks.
 
+Conceptually:
+
+```text
+AWS IAM Role
+       +
+Databricks External ID
+       │
+       ▼
+Unity Catalog Storage Credential
+```
+
+The Storage Credential separates cloud authentication configuration from
+individual notebooks and workloads.
+
+---
+
+# Unity Catalog External Location
+
+The Storage Credential was associated with the S3 Landing layer through a
+Unity Catalog External Location.
+
+```text
 External Location:
 clinical_trial_s3
+
 S3 Path:
 s3://clinical-trial-intelligence-platform-sk/Landing/
+
 Storage Credential:
 clinical_trial_s3_credential
+```
 
-This follows the Databricks Unity Catalog model in which a storage credential encapsulates cloud authentication while an external location associates that credential with a cloud-storage path.  ⁠Databricks — Connect to S3 with Unity Catalog
+Architecture:
 
-Troubleshooting and Engineering Decisions
-
-The integration did not work successfully on the first attempt. Several IAM and storage-access issues were identified and resolved during implementation.
-
-Issue 1 — Self Assume Role Failure
-
-Initial Storage Credential validation returned:
-
-Success - Assume Role
-Failed  - Self Assume Role
-Success - External ID Condition
-
-The IAM role could be assumed by Databricks, but the configuration did not satisfy the self-assume requirement.
-
-The IAM trust/permission configuration was updated to allow the required role-assumption behavior while retaining the Databricks-generated External ID condition.
-
-After the change:
-
-Success - Assume Role
-Success - Self Assume Role
-Success - External ID Condition
-
-Issue 2 — File Events Permission Failure
-
-During External Location creation, Databricks initially reported failures while provisioning managed file-event resources.
-
-The error exposed missing authorization around S3 bucket notification configuration.
-
-Instead of bypassing the validation using Force Create, the IAM permissions were investigated and extended with the required S3, SNS, and SQS permissions for Databricks-managed file events.
-
-After updating the IAM policy, validation confirmed successful:
-
-File Events Resource Provision  ✅
-Read File Event Queue           ✅
-Purge File Event Queue          ✅
-File Events Resource Teardown   ✅
-
-Issue 3 — S3 Read Permission Denied
-
-After resolving the file-event permissions, the External Location validation still returned:
-
-Failed - Read
-
-This demonstrated that successful role assumption does not automatically imply successful access to the underlying S3 data.
-
-The S3 data-access permissions and target path were reviewed. The External Location was ultimately mapped to the intended landing prefix:
-
+```text
+Storage Credential
+       │
+       ▼
+External Location
+       │
+       ▼
 s3://clinical-trial-intelligence-platform-sk/Landing/
+```
 
-and the IAM role was configured with the corresponding bucket and object-level permissions.
+This allows access to the S3 path to be governed through Unity Catalog.
 
-Final Validation
+---
 
-The final Databricks Test Connection completed successfully.
+# Storage Credential Validation
 
-Read                   ✅
-List                   ✅
-Write                  ✅
-Delete                 ✅
-Path Exists            ✅
-File Events Read       ✅
-Assume Role            ✅
-Self Assume Role       ✅
-External ID Condition  ✅
+During initial configuration, Storage Credential validation returned:
 
-Result: All Permissions Confirmed
+```text
+Assume Role             PASS
+External ID Condition   PASS
+Self Assume Role        FAIL
+```
 
-The Databricks Storage Credential therefore has the permissions required to access the configured S3 External Location.
+The IAM role could be assumed by Databricks, but the role-assumption
+configuration did not satisfy the self-assume requirement.
 
-⸻
-
-STAR Interview Story
-
-Situation: While integrating AWS S3 with Databricks Unity Catalog for a clinical-trial data platform, the Storage Credential and External Location repeatedly failed validation because of IAM trust, self-assumption, file-event, and S3 access issues.
-
-Task: Establish secure, governed read/write connectivity between Databricks and the project’s S3 landing layer without using long-lived AWS access keys or bypassing failed validation.
-
-Action: I created a dedicated IAM role, configured STS role assumption using the Databricks principal and External ID, and granted bucket/object-level S3 permissions. When validation reported a Self Assume Role failure, I corrected the role-assumption configuration. A subsequent failure showed missing permissions for managed file events, so I added the required S3 notification, SNS, and SQS permissions. Finally, I diagnosed the remaining S3 Read failure by validating both the IAM data permissions and the exact S3 prefix used by the External Location rather than using Force Create to bypass the checks.
-
-Result: The final Unity Catalog External Location passed all validation checks, including Read, List, Write, Delete, Path Exists, File Events Read, Assume Role, Self Assume Role, and External ID Condition. The S3 landing layer is now securely accessible through Databricks Unity Catalog and ready for the downstream Bronze ingestion pipeline.
-
-Key Learning
-
-Authentication and authorization are separate concerns. Successful AssumeRole proves that Databricks can obtain the AWS role, but it does not prove that the role can access the required S3 objects. IAM trust policy controls who can assume the role, while the IAM permissions policy controls what the assumed role can actually do.
-
-That distinction is probably the most interview-worthy learning from this entire setup, because you encountered it through an actual failure rather than simply configuring a happy-path tutorial.
-
-Yes. This is a very good checkpoint to update your README, because you have completed the entire AWS S3 → IAM → Databricks Unity Catalog connectivity layer. Databricks defines the storage credential as the authentication abstraction and the external location as the combination of that credential with the cloud-storage path.  
-
-I would put the following section in your README before moving to Bronze/Silver/Gold.
-
-AWS S3 Integration with Databricks Unity Catalog
-
-The Clinical Trial Intelligence Platform uses Amazon S3 as the cloud data lake and Databricks Unity Catalog for centralized data governance and controlled access to cloud storage.
-
-Architecture implemented so far
-
-                    AWS
-                     │
-                     ▼
-        S3 Bucket
-clinical-trial-intelligence-platform-sk
-                     │
-                     ▼
-                  Landing/
-                     │
-                     │ IAM permissions
-                     ▼
-      databricks-clinical-trial-s3-role
-                     │
-                     │ STS AssumeRole
-                     ▼
-              Databricks
-                     │
-                     ▼
-          Storage Credential
-      clinical_trial_s3_credential
-                     │
-                     ▼
-           External Location
-            clinical_trial_s3
-                     │
-                     ▼
-       s3://clinical-trial-intelligence-
-           platform-sk/Landing/
-                     │
-                     ▼
-              Unity Catalog
-       clinical_trial_intelligence
-
-1. Amazon S3 Data Lake
-
-Created an S3 bucket to serve as the cloud storage layer for the platform.
-
-Bucket:
-clinical-trial-intelligence-platform-sk
-Initial ingestion path:
-s3://clinical-trial-intelligence-platform-sk/Landing/
-
-The Landing/ path is intended to receive source data before downstream processing.
-
-⸻
-
-2. IAM Role for Databricks
-
-Created a dedicated AWS IAM role:
-
-databricks-clinical-trial-s3-role
-
-The role provides Databricks with controlled access to the required S3 resources rather than embedding AWS access keys in notebooks or application code.
-
-The IAM policy provides the required S3 operations and permissions needed for Databricks file-event integration.
-
-⸻
-
-3. Cross-Account Trust Configuration
-
-Configured the IAM role’s trust relationship so that Databricks can assume the AWS IAM role using AWS STS.
-
-The trust relationship includes:
-
-Action:
-sts:AssumeRole
-Security condition:
-sts:ExternalId
-
-The Databricks-generated External ID was added to the IAM trust policy.
-
-This protects the AssumeRole relationship by ensuring that the role can only be assumed when the expected External ID condition is satisfied.
-
-⸻
-
-4. Databricks Storage Credential
-
-Created the Unity Catalog storage credential:
-
-clinical_trial_s3_credential
-
-Credential type:
-
-AWS IAM Role
-
-The credential references:
-
-AWS IAM Role
-        +
-Databricks External ID
-
-The storage credential abstracts the cloud authentication mechanism from users and workloads.  
-
-⸻
-
-5. Storage Credential Validation
-
-The initial validation identified a configuration problem:
-
-Success - Assume Role
-Failed  - Self Assume Role
-Success - External ID Condition
-
-The IAM trust policy was updated to support the required role-assumption configuration.
+The IAM trust/permission configuration was corrected while retaining the
+External ID security condition.
 
 After correction:
 
-Success - Assume Role
-Success - Self Assume Role
-Success - External ID Condition
-All Permissions Confirmed
+```text
+Assume Role             PASS
+Self Assume Role        PASS
+External ID Condition   PASS
+```
 
-This validated the AWS IAM ↔ Databricks authentication configuration.
+---
 
-⸻
+# Troubleshooting — External Location File Events
 
-6. File Events Permission Issue
+## Problem
 
-During creation of the external location, Databricks initially failed to verify file-event permissions.
+After basic S3 connectivity was established, Databricks failed while validating
+the resources required for automatic file events.
 
-The validation reported failure while attempting operations associated with S3 bucket notifications.
+Normal storage operations were working, but file-event resource provisioning
+and teardown failed.
 
-Additional permissions for the Databricks managed file-event infrastructure were therefore added for:
+The AWS error exposed missing authorization associated with the S3 bucket
+notification configuration, including:
 
+```text
+s3:GetBucketNotification
+```
+
+## Investigation
+
+The validation results were analyzed individually rather than treating the
+integration as a single pass/fail operation.
+
+The working and failing components were separated as follows:
+
+```text
+Databricks → IAM Role             WORKING
+IAM Role → S3                     WORKING
+External ID Validation            WORKING
+Read / Write / List / Delete      WORKING
+File Event Configuration          FAILING
+```
+
+This demonstrated that the problem was isolated to the event-infrastructure
+permissions rather than basic S3 connectivity.
+
+## Resolution
+
+The IAM permissions associated with the Databricks storage role were extended
+with the required permissions for Databricks-managed file-event infrastructure.
+
+The required configuration involved permissions associated with:
+
+```text
 Amazon S3
 Amazon SNS
 Amazon SQS
+```
 
-This enabled Databricks to provision and manage the resources required for file-event processing.
+After correcting the permissions, Databricks successfully validated the
+file-event operations.
 
-This troubleshooting step demonstrated that successful S3 data access does not automatically imply sufficient permissions for event-driven ingestion infrastructure.
+```text
+File Events Resource Provision    PASS
+Read File Event Queue             PASS
+Purge File Event Queue            PASS
+File Events Resource Teardown     PASS
+```
 
-⸻
+---
 
-7. S3 Data Access Permission Issue
+# Why "Force Create" Was Not Used
 
-A subsequent validation showed:
+Databricks provided an option to force creation of the external location even
+when the file-event validation failed.
 
-Failed  - Read
-Success - Assume Role
-Success - Self Assume Role
-Success - External ID Condition
-Success - File Events Resource Provision
-Success - Read File Event Queue
-Success - Purge File Event Queue
-Success - File Events Resource Teardown
+The issue was investigated instead of bypassing the failed validation because
+the target ingestion architecture is intended to support scalable incremental
+file discovery.
 
-The IAM policy was updated with the required S3 data-plane permissions, including object and bucket operations.
+This also avoided hiding an underlying IAM configuration problem.
 
-After correcting the S3 permissions, the external location validation returned:
+---
 
-Success - Read
-Success - List
-Success - Write
-Success - Delete
-Success - Path Exists
-Success - File Events Read
-Success - Assume Role
-Success - Self Assume Role
-Success - External ID Condition
-All Permissions Confirmed
+# Troubleshooting — S3 Read Permission
 
-⸻
+After the file-event configuration was corrected, another validation exposed
+an S3 read-access issue.
 
-8. Unity Catalog External Location
+The important observation was that role assumption itself was already working.
 
-Created the external location:
+Conceptually:
 
-Name:
-clinical_trial_s3
-URL:
+```text
+Databricks
+     │
+     │ AssumeRole
+     ▼
+IAM Role                    PASS
+     │
+     │ GetObject / ListBucket
+     ▼
+S3 Data                     FAIL
+```
+
+This demonstrated the difference between authentication and authorization.
+
+The S3 data-access permissions and target path were reviewed and corrected for
+the intended Landing prefix.
+
+Final path:
+
+```text
 s3://clinical-trial-intelligence-platform-sk/Landing/
-Storage Credential:
-clinical_trial_s3_credential
+```
 
-An external location associates an S3 URI with a Unity Catalog storage credential, allowing access to the cloud path to be governed through Unity Catalog.  
+---
 
-⸻
+# Final External Location Validation
 
-9. Unity Catalog
+After correcting the IAM trust relationship, data permissions, and file-event
+permissions, the external-location validation completed successfully.
 
-Created the project catalog:
+```text
+Read                         PASS
+List                         PASS
+Write                        PASS
+Delete                       PASS
+Path Exists                  PASS
+File Events Read             PASS
+Assume Role                  PASS
+Self Assume Role             PASS
+External ID Condition        PASS
+```
 
+Result:
+
+```text
+ALL REQUIRED PERMISSIONS CONFIRMED
+```
+
+---
+
+# Unity Catalog
+
+A dedicated Unity Catalog catalog was created for the project.
+
+```text
 clinical_trial_intelligence
+```
 
-Description:
+Its purpose is to govern the platform's clinical-trial datasets across the
+processing layers.
 
-Unity Catalog for the Clinical Trial Intelligence Platform.
-Governs clinical trial data across the Landing, Bronze,
-Silver, and Gold layers, with AWS S3 used as external
-cloud storage.
+Current catalog structure:
 
-The catalog currently contains the automatically available:
-
+```text
 clinical_trial_intelligence
 │
 ├── default
-│
 └── information_schema
+```
 
-The next stage will introduce the platform’s processing schemas.
+The planned processing schemas are:
 
+```text
 clinical_trial_intelligence
 │
 ├── bronze
 ├── silver
 └── gold
+```
 
-Current project status
+The Bronze schema is the next implementation milestone.
 
-S3 Bucket                         ✅
-Landing Zone                      ✅
-IAM Role                          ✅
-IAM S3 Permissions                ✅
-IAM SNS/SQS File Event Permissions✅
-Cross-account Trust               ✅
-External ID                       ✅
-Storage Credential                ✅
-Credential Validation             ✅
-External Location                 ✅
-External Location Validation      ✅
-Unity Catalog                     ✅
-Bronze Schema                     ⏳ NEXT
-Silver Schema                     ⏳
-Gold Schema                       ⏳
-Data Ingestion                    ⏳
-Transformation Pipeline           ⏳
-Data Quality                      ⏳
-Serving / Dashboard               ⏳
+---
 
-This is worth documenting because the architecture is not simply “Databricks connected to S3.” You have implemented the security/governance chain:
+# Raw S3 Data Access Validation
 
-S3 → IAM policy → IAM trust relationship → STS/External ID → Storage Credential → External Location → Unity Catalog.
+Before implementing production ingestion, direct access from Databricks to the
+S3 Landing layer was tested.
 
-That is also a strong interview discussion point because you encountered and diagnosed three different classes of access problems: role assumption, file-event permissions, and S3 data-plane permissions, rather than solving them by granting broad unrestricted access.
+Validated source:
 
-Next, we can create bronze properly and decide its S3 storage path before clicking anything.
+```text
+s3://clinical-trial-intelligence-platform-sk/Landing/EDC/subjects/
+```
 
-## Implementation Status
+A PySpark DataFrame was created using:
 
-### Phase 1 — AWS and Databricks Foundation ✅
+```python
+source_path = "s3://clinical-trial-intelligence-platform-sk/Landing/EDC/subjects/"
 
-- Created the AWS S3 data lake for the Clinical Trial Intelligence Platform.
-- Created the Landing layer for raw source-system data.
-- Organized source data into EDC, CTMS, Lab, Safety, master, and protocol domains.
-- Created an AWS IAM role for Databricks.
-- Configured S3, SNS, and SQS permissions required for data access and file events.
-- Created a Unity Catalog storage credential using the AWS IAM role.
-- Created and validated the `clinical_trial_s3` external location.
-- Enabled file events for incremental file discovery.
-- Created the `clinical_trial_intelligence` Unity Catalog catalog.
-- Configured the managed storage location.
-- Successfully validated access to raw S3 files from Databricks.
+df = (
+    spark.read
+    .option("header", "true")
+    .option("inferSchema", "true")
+    .csv(source_path)
+)
 
-Example validated source path:
+display(df.limit(10))
+```
 
-`Landing/EDC/subjects/`
+The DataFrame was successfully created and sample records were displayed.
 
-Databricks successfully detected the date-partitioned/source files stored in this location.
+This confirmed that:
 
-### Phase 2 — Data Engineering Pipeline ⏳
+- Databricks can access the S3 Landing layer.
+- The Unity Catalog External Location is functioning.
+- The AWS IAM role provides the required S3 read access.
+- Files under `Landing/EDC/subjects/` can be discovered.
+- Spark can parse the source CSV data.
+- The source is accessible for the Bronze ingestion implementation.
 
-Next implementation phase:
+This test is only a connectivity and source-read validation.
 
-S3 Landing → Auto Loader → Bronze Delta → Silver Delta → Gold Delta
+It is **not** the production ingestion mechanism.
 
-Pipeline code will be version-controlled in GitHub and deployed to Databricks using CI/CD.
+The target production flow is:
+
+```text
+S3 Landing
+     │
+     ▼
+Auto Loader
+     │
+     ▼
+Bronze Delta
+     │
+     ▼
+Silver Delta
+     │
+     ▼
+Gold Delta
+```
+
+---
+
+# GitHub – Databricks Development Integration
+
+Before starting the Bronze ingestion implementation, the GitHub repository was
+connected to the Databricks workspace using a Databricks Git folder.
+
+GitHub repository:
+
+```text
+clinical-trial-intelligence-platform
+```
+
+Development architecture:
+
+```text
+VS Code / Local Development
+        │
+        ▼
+GitHub Repository
+        │
+        ├── main
+        └── test
+             │
+             ▼
+     Databricks Git Folder
+             │
+             ▼
+     Databricks Development
+```
+
+The Databricks Git folder was created under the user workspace and connected
+to the existing GitHub repository.
+
+The `test` branch is currently used for development and validation.
+
+This allows local development and Databricks development to remain associated
+with the same Git repository.
+
+The repository acts as the source-control layer for pipeline code.
+
+Current development workflow:
+
+```text
+Local / Databricks Development
+             │
+             ▼
+          test
+             │
+             ▼
+         Git Commit
+             │
+             ▼
+          GitHub
+             │
+             ▼
+       Pull Request
+             │
+             ▼
+           main
+```
+
+---
+
+# Bronze Layer — Planned Design
+
+The next implementation milestone is the Bronze layer.
+
+Bronze will provide the first persistent Delta representation of source-system
+data.
+
+The initial implementation will use one dataset before generalizing the
+pattern.
+
+```text
+Source System:
+EDC
+
+Dataset:
+subjects
+
+Source:
+s3://clinical-trial-intelligence-platform-sk/Landing/EDC/subjects/
+
+Target:
+clinical_trial_intelligence.bronze.edc_subjects
+```
+
+Planned flow:
+
+```text
+Landing/EDC/subjects/
+        │
+        │ CSV source files
+        ▼
+Databricks Auto Loader
+        │
+        │ Incremental ingestion
+        ▼
+clinical_trial_intelligence
+        │
+        └── bronze
+              │
+              └── edc_subjects
+                     │
+                     ▼
+                 Delta Table
+```
+
+Bronze will preserve source information with minimal transformation.
+
+Additional ingestion metadata will be introduced for lineage and
+observability, including fields such as:
+
+```text
+source file
+ingestion timestamp
+ingestion date
+```
+
+The first implementation will be validated using `EDC/subjects` before the
+pattern is generalized to additional clinical-trial datasets.
+
+---
+
+# Planned Bronze Implementation Sequence
+
+The Bronze layer will be implemented incrementally.
+
+1. Create the `bronze` schema in Unity Catalog.
+2. Implement Auto Loader for `EDC/subjects`.
+3. Add ingestion metadata.
+4. Persist the ingested data as a Delta table.
+5. Validate the initial ingestion.
+6. Add a new source file to the S3 Landing path.
+7. Validate incremental ingestion.
+8. Confirm that already processed files are not unnecessarily reprocessed.
+9. Test schema evolution.
+10. Generalize the ingestion pattern for additional source datasets.
+11. Introduce automated data-quality and pipeline tests.
+12. Integrate the stable pipeline with the project's deployment architecture.
+
+---
+
+# Repository Structure
+
+Current repository:
+
+```text
+clinical-trial-intelligence-platform/
+│
+├── README.md
+│
+└── data/
+```
+
+The repository will evolve incrementally rather than creating unused
+directories in advance.
+
+The next expected structure is:
+
+```text
+clinical-trial-intelligence-platform/
+│
+├── README.md
+│
+├── data/
+│
+└── src/
+    └── bronze/
+        └── edc_subjects.py
+```
+
+As additional layers are implemented, the target structure will evolve toward:
+
+```text
+clinical-trial-intelligence-platform/
+│
+├── README.md
+│
+├── data/
+│
+├── src/
+│   ├── bronze/
+│   ├── silver/
+│   └── gold/
+│
+├── tests/
+│
+├── resources/
+│
+└── .github/
+    └── workflows/
+```
+
+CI/CD configuration will be introduced after the core pipeline has been
+implemented and validated.
+
+---
+
+# Planned CI/CD Architecture
+
+GitHub will act as the source of truth for pipeline and deployment code.
+
+Development workflow:
+
+```text
+Developer
+    │
+    ▼
+test / feature branch
+    │
+    ▼
+GitHub
+    │
+    ▼
+Pull Request
+    │
+    ▼
+main
+```
+
+Target deployment workflow:
+
+```text
+main
+    │
+    ▼
+GitHub Actions
+    │
+    ▼
+Databricks Declarative Automation Bundles
+    │
+    ▼
+Databricks Jobs / Lakeflow Pipelines
+```
+
+GitHub Actions and Databricks Declarative Automation Bundles are planned for a
+later phase to automate validation and deployment of Databricks resources.
+
+They have **not yet been implemented**.
+
+---
+
+# Current Implementation Status
+
+## Phase 1 — AWS + Databricks Foundation ✅
+
+```text
+S3 Data Lake                               ✅
+Landing Zone                               ✅
+Source-system folder structure             ✅
+AWS IAM Role                               ✅
+IAM Permission Policy                      ✅
+IAM Trust Relationship                     ✅
+STS AssumeRole                             ✅
+External ID                                ✅
+Storage Credential                         ✅
+Storage Credential Validation              ✅
+External Location                          ✅
+External Location Validation               ✅
+File Events                                ✅
+Unity Catalog                              ✅
+S3 → Databricks read validation            ✅
+GitHub Repository                          ✅
+Databricks Git Folder                      ✅
+GitHub ↔ Databricks integration            ✅
+```
+
+## Phase 2 — Bronze Layer 🚧
+
+```text
+Bronze architecture                        PLANNED
+Bronze Unity Catalog schema                NEXT
+EDC Subjects Auto Loader                   PENDING
+Bronze Delta table                         PENDING
+Ingestion metadata                         PENDING
+Initial ingestion validation               PENDING
+Incremental ingestion validation           PENDING
+Schema evolution testing                   PENDING
+Generalized Bronze ingestion               PENDING
+```
+
+## Future Phases
+
+```text
+Silver Layer                               PENDING
+Data Quality                               PENDING
+Gold Layer                                 PENDING
+Lakeflow Pipeline                          PENDING
+Automated Testing                          PENDING
+GitHub Actions CI/CD                       PENDING
+Declarative Automation Bundles             PENDING
+Dashboard / Serving                        PENDING
+```
+
+---
+
+# Engineering Lessons
+
+Several important engineering concepts were demonstrated during the platform
+foundation work.
+
+### Authentication != Authorization
+
+```text
+AssumeRole succeeds
+        ≠
+S3 access automatically succeeds
+```
+
+Authentication determines whether Databricks can assume the AWS role.
+
+Authorization determines what that assumed role is allowed to do.
+
+### Storage Access != Event Infrastructure
+
+```text
+S3 Read/Write
+      ≠
+S3/SNS/SQS file-event permissions
+```
+
+Successful object access does not prove that the role can provision or use
+event-driven ingestion infrastructure.
+
+### Validate Components Independently
+
+Instead of treating an integration as simply:
+
+```text
+WORKING / NOT WORKING
+```
+
+the architecture was decomposed into:
+
+```text
+Identity
+   ↓
+STS Role Assumption
+   ↓
+External ID Validation
+   ↓
+IAM Authorization
+   ↓
+S3 Storage Access
+   ↓
+File Event Infrastructure
+   ↓
+Databricks Processing
+```
+
+This made it possible to isolate failures without unnecessarily modifying
+components that were already functioning.
+
+---
+
+# Interview Story — Databricks S3 Integration Failure
+
+## Situation
+
+While building the Clinical Trial Intelligence Platform using AWS S3 and
+Databricks, the Unity Catalog Storage Credential and External Location
+encountered multiple validation failures involving role assumption, S3
+permissions, and automatic file events.
+
+## Task
+
+The objective was to establish secure and governed connectivity between
+Databricks and the S3 Landing layer without embedding long-lived AWS
+credentials or bypassing failed validation.
+
+## Action
+
+The integration was debugged layer by layer.
+
+The IAM trust relationship and External ID were first validated.
+
+When the Storage Credential reported a Self Assume Role failure, the
+role-assumption configuration was corrected.
+
+A subsequent external-location validation exposed missing authorization for
+managed file events. The failure was isolated to the event infrastructure and
+the required S3/SNS/SQS permissions were configured.
+
+Finally, an S3 read-access failure was investigated separately from role
+assumption. The S3 data permissions and target Landing prefix were reviewed
+and corrected.
+
+Rather than granting unrestricted permissions or bypassing validation using
+Force Create, each failing component was isolated and corrected independently.
+
+## Result
+
+The final Unity Catalog External Location passed the required storage,
+role-assumption, External ID, and file-event validation checks.
+
+The S3 Landing layer is now accessible from Databricks through Unity Catalog
+and is ready for the Bronze ingestion implementation.
+
+## Leadership Principles Demonstrated
+
+Primary:
+
+- Dive Deep
+- Ownership
+
+Supporting:
+
+- Learn and Be Curious
+- Insist on the Highest Standards
+
+---
+
+# Troubleshooting Evidence
+
+Screenshots and troubleshooting evidence can be maintained separately from the
+main README.
+
+Planned structure:
+
+```text
+docs/
+└── troubleshooting/
+    ├── databricks-storage-credential-success.png
+    ├── external-location-file-events-failure.png
+    └── external-location-file-events-success.png
+```
+
+This keeps the README focused while retaining implementation evidence and
+debugging history.
+
+---
+
+# Current Checkpoint
+
+The cloud and governance foundation is complete.
+
+```text
+AWS S3
+   │
+   ▼
+IAM / STS / External ID
+   │
+   ▼
+Unity Catalog Storage Credential
+   │
+   ▼
+External Location
+   │
+   ▼
+S3 Landing Access
+   │
+   ▼
+GitHub ↔ Databricks Development
+   │
+   ▼
+──────────────────────────────
+   │
+   ▼
+Bronze Schema             ← NEXT
+   │
+   ▼
+Auto Loader
+   │
+   ▼
+Bronze Delta
+   │
+   ▼
+Incremental Ingestion Test
+   │
+   ▼
+Schema Evolution Test
+   │
+   ▼
+Silver
+   │
+   ▼
+Gold
+```
+
+The next implementation milestone is the creation of the Bronze schema and the
+first incremental ingestion pipeline for `EDC/subjects`.
