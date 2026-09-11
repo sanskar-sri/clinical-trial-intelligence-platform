@@ -1,0 +1,2744 @@
+{
+  "datasets": [
+    {
+      "name": "12422788",
+      "displayName": "gold_reconciliation",
+      "config": {
+        "version": "1.1",
+        "source": "clinical_trial_intelligence.gold.gold_reconciliation",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          }
+        ],
+        "measures": [
+          {
+            "name": "count",
+            "expr": "COUNT(*)",
+            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
+            "displayName": "Count"
+          },
+          {
+            "displayName": "Overall Quarantine Rate",
+            "format": {
+              "type": "percentage",
+              "decimalPlaces": {
+                "type": "exact",
+                "places": 2.0
+              },
+              "hideGroupSeparator": false
+            },
+            "name": "Overall Quarantine Rate",
+            "expr": "try_divide(\n  SUM(quarantined_records),\n  SUM(bronze_records)\n)",
+            "comment": "Percentage of Bronze source records routed to quarantine across source entities."
+          }
+        ]
+      }
+    },
+    {
+      "name": "603b6bdd",
+      "displayName": "dq_dashboard",
+      "queryLines": [
+        "SELECT\n",
+        "    source_entity,\n",
+        "    bronze_records,\n",
+        "    silver_records,\n",
+        "    quarantined_records,\n",
+        "    quarantine_rate,\n",
+        "    reconciled_flag,\n",
+        "    _gold_generated_at\n",
+        "FROM clinical_trial_intelligence.gold.gold_reconciliation;"
+      ]
+    },
+    {
+      "name": "865ba12a",
+      "displayName": "dq_summary",
+      "queryLines": [
+        "SELECT\n",
+        "    COUNT(DISTINCT dq_rule) AS failed_rules,\n",
+        "    SUM(failure_count) AS total_rule_failures\n",
+        "FROM clinical_trial_intelligence.gold.gold_data_quality_metrics\n",
+        "WHERE failure_count > 0;"
+      ]
+    },
+    {
+      "name": "52da1028",
+      "displayName": "dq_failure_reasons",
+      "queryLines": [
+        "SELECT\n",
+        "    dq_rule,\n",
+        "    SUM(failure_count) AS failure_count\n",
+        "FROM clinical_trial_intelligence.gold.gold_data_quality_metrics\n",
+        "WHERE failure_count > 0\n",
+        "GROUP BY dq_rule\n",
+        "ORDER BY failure_count DESC\n",
+        "LIMIT 10;"
+      ]
+    },
+    {
+      "name": "8e4fe4cb",
+      "displayName": "reconciliation_status",
+      "queryLines": [
+        "SELECT\n",
+        "    SUM(CASE WHEN reconciled_flag = true THEN 1 ELSE 0 END) AS reconciled_entities,\n",
+        "    COUNT(*) AS total_entities,\n",
+        "    SUM(CASE WHEN reconciled_flag = false THEN 1 ELSE 0 END) AS unreconciled_entities\n",
+        "FROM clinical_trial_intelligence.gold.gold_reconciliation;"
+      ]
+    },
+    {
+      "name": "9f0d42ae",
+      "displayName": "study_overview",
+      "queryLines": [
+        "SELECT\n",
+        "    COUNT(DISTINCT CASE\n",
+        "        WHEN ever_enrolled_flag = 1 THEN subject_id\n",
+        "    END) AS enrolled_subjects,\n",
+        "\n",
+        "    ROUND(\n",
+        "        100.0 * SUM(ever_screen_failed_flag)\n",
+        "        / NULLIF(SUM(ever_screened_flag), 0), 2\n",
+        "    ) AS screen_fail_rate_pct,\n",
+        "\n",
+        "    ROUND(\n",
+        "        100.0 * SUM(ever_discontinued_flag)\n",
+        "        / NULLIF(SUM(ever_enrolled_flag), 0), 2\n",
+        "    ) AS discontinuation_rate_pct,\n",
+        "\n",
+        "    ROUND(\n",
+        "        100.0 * SUM(completed_visits)\n",
+        "        / NULLIF(SUM(total_visits), 0), 2\n",
+        "    ) AS visit_completion_rate_pct,\n",
+        "\n",
+        "    COUNT(DISTINCT CASE\n",
+        "        WHEN serious_ae_count > 0 THEN subject_id\n",
+        "    END) AS subjects_with_serious_ae,\n",
+        "\n",
+        "    MAX(_gold_generated_at) AS last_gold_refresh\n",
+        "\n",
+        "FROM clinical_trial_intelligence.gold.gold_subject_summary;"
+      ]
+    },
+    {
+      "name": "91b03c63",
+      "displayName": "overall_quarantine",
+      "queryLines": [
+        "SELECT\n",
+        "    SUM(quarantined_records) * 1.0 /\n",
+        "    NULLIF(SUM(bronze_records), 0) AS quarantine_rate\n",
+        "FROM clinical_trial_intelligence.gold.gold_reconciliation;"
+      ]
+    },
+    {
+      "name": "099bbc4b",
+      "displayName": "enrollment_trend",
+      "queryLines": [
+        "SELECT\n",
+        "    enrollment_date,\n",
+        "    COUNT(*) AS daily_enrolled,\n",
+        "    SUM(COUNT(*)) OVER (\n",
+        "        ORDER BY enrollment_date\n",
+        "        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW\n",
+        "    ) AS cumulative_enrolled\n",
+        "FROM clinical_trial_intelligence.gold.gold_subject_summary\n",
+        "WHERE ever_enrolled_flag = 1\n",
+        "  AND enrollment_date IS NOT NULL\n",
+        "GROUP BY enrollment_date\n",
+        "ORDER BY enrollment_date;"
+      ]
+    },
+    {
+      "name": "4a06ba1a",
+      "displayName": "subject_funnel",
+      "queryLines": [
+        "SELECT 'Screened' AS stage,\n",
+        "       SUM(ever_screened_flag) AS subjects,\n",
+        "       1 AS stage_order\n",
+        "FROM clinical_trial_intelligence.gold.gold_subject_summary\n",
+        "\n",
+        "UNION ALL\n",
+        "\n",
+        "SELECT 'Enrolled',\n",
+        "       SUM(ever_enrolled_flag),\n",
+        "       2\n",
+        "FROM clinical_trial_intelligence.gold.gold_subject_summary\n",
+        "\n",
+        "UNION ALL\n",
+        "\n",
+        "SELECT 'Randomized',\n",
+        "       SUM(ever_randomized_flag),\n",
+        "       3\n",
+        "FROM clinical_trial_intelligence.gold.gold_subject_summary\n",
+        "\n",
+        "ORDER BY stage_order;"
+      ]
+    },
+    {
+      "name": "db5457c6",
+      "displayName": "study_summary",
+      "queryLines": [
+        "SELECT\n",
+        "    study_id,\n",
+        "\n",
+        "    COUNT(DISTINCT CASE\n",
+        "        WHEN ever_screened_flag = 1 THEN subject_id\n",
+        "    END) AS screened,\n",
+        "\n",
+        "    COUNT(DISTINCT CASE\n",
+        "        WHEN ever_enrolled_flag = 1 THEN subject_id\n",
+        "    END) AS enrolled,\n",
+        "\n",
+        "    COUNT(DISTINCT CASE\n",
+        "        WHEN ever_randomized_flag = 1 THEN subject_id\n",
+        "    END) AS randomized,\n",
+        "\n",
+        "    COUNT(DISTINCT CASE\n",
+        "        WHEN ever_completed_flag = 1 THEN subject_id\n",
+        "    END) AS completed,\n",
+        "\n",
+        "    ROUND(\n",
+        "        100.0 * SUM(ever_screen_failed_flag)\n",
+        "        / NULLIF(SUM(ever_screened_flag), 0),\n",
+        "        1\n",
+        "    ) AS screen_fail_pct,\n",
+        "\n",
+        "    ROUND(\n",
+        "        100.0 * SUM(ever_discontinued_flag)\n",
+        "        / NULLIF(SUM(ever_enrolled_flag), 0),\n",
+        "        1\n",
+        "    ) AS discontinuation_pct,\n",
+        "\n",
+        "    ROUND(\n",
+        "        100.0 * SUM(completed_visits)\n",
+        "        / NULLIF(SUM(total_visits), 0),\n",
+        "        1\n",
+        "    ) AS visit_completion_pct,\n",
+        "\n",
+        "    COUNT(DISTINCT CASE\n",
+        "        WHEN serious_ae_count > 0 THEN subject_id\n",
+        "    END) AS subjects_with_serious_ae\n",
+        "\n",
+        "FROM clinical_trial_intelligence.gold.gold_subject_summary\n",
+        "\n",
+        "GROUP BY study_id\n",
+        "ORDER BY study_id;"
+      ]
+    },
+    {
+      "name": "530d48c3",
+      "displayName": "enrollment_monthly",
+      "queryLines": [
+        "WITH monthly AS (\n",
+        "    SELECT\n",
+        "        DATE_TRUNC('MONTH', enrollment_date) AS enrollment_month,\n",
+        "        COUNT(DISTINCT subject_id) AS monthly_enrollment\n",
+        "    FROM clinical_trial_intelligence.gold.gold_subject_summary\n",
+        "    WHERE ever_enrolled_flag = 1\n",
+        "      AND enrollment_date IS NOT NULL\n",
+        "    GROUP BY DATE_TRUNC('MONTH', enrollment_date)\n",
+        ")\n",
+        "\n",
+        "SELECT\n",
+        "    enrollment_month,\n",
+        "    monthly_enrollment,\n",
+        "    SUM(monthly_enrollment) OVER (\n",
+        "        ORDER BY enrollment_month\n",
+        "        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW\n",
+        "    ) AS cumulative_enrollment\n",
+        "FROM monthly\n",
+        "ORDER BY enrollment_month;"
+      ]
+    },
+    {
+      "name": "aef35ee1",
+      "displayName": "site_performance",
+      "queryLines": [
+        "SELECT\n",
+        "    study_id,\n",
+        "    site_id,\n",
+        "\n",
+        "    COUNT(DISTINCT CASE\n",
+        "        WHEN ever_enrolled_flag = 1 THEN subject_id\n",
+        "    END) AS enrolled_subjects,\n",
+        "\n",
+        "    ROUND(\n",
+        "        100.0 * SUM(ever_screen_failed_flag)\n",
+        "        / NULLIF(SUM(ever_screened_flag), 0),\n",
+        "        2\n",
+        "    ) AS screen_fail_rate_pct,\n",
+        "\n",
+        "    ROUND(\n",
+        "        100.0 * SUM(ever_discontinued_flag)\n",
+        "        / NULLIF(SUM(ever_enrolled_flag), 0),\n",
+        "        2\n",
+        "    ) AS discontinuation_rate_pct,\n",
+        "\n",
+        "    ROUND(\n",
+        "        100.0 * SUM(completed_visits)\n",
+        "        / NULLIF(SUM(total_visits), 0),\n",
+        "        2\n",
+        "    ) AS visit_completion_rate_pct,\n",
+        "\n",
+        "    COUNT(DISTINCT CASE\n",
+        "        WHEN serious_ae_count > 0 THEN subject_id\n",
+        "    END) AS subjects_with_serious_ae\n",
+        "\n",
+        "FROM clinical_trial_intelligence.gold.gold_subject_summary\n",
+        "GROUP BY study_id, site_id;"
+      ]
+    },
+    {
+      "name": "b0b2783d",
+      "displayName": "patient_visit_monitoring",
+      "queryLines": [
+        "SELECT\n",
+        "    subject_id,\n",
+        "    study_id,\n",
+        "    site_id,\n",
+        "    current_subject_status,\n",
+        "    days_on_study,\n",
+        "    total_visits,\n",
+        "    completed_visits,\n",
+        "    missed_visits,\n",
+        "    rescheduled_visits,\n",
+        "    ROUND(\n",
+        "        100.0 * completed_visits / NULLIF(total_visits, 0),\n",
+        "        2\n",
+        "    ) AS visit_completion_pct,\n",
+        "    ROUND(\n",
+        "        100.0 * missed_visits / NULLIF(total_visits, 0),\n",
+        "        2\n",
+        "    ) AS missed_visit_pct,\n",
+        "    serious_ae_count,\n",
+        "    abnormal_lab_rate,\n",
+        "    days_since_last_visit\n",
+        "FROM clinical_trial_intelligence.gold.gold_subject_summary;"
+      ]
+    },
+    {
+      "name": "209cca6d",
+      "displayName": "visit_preview",
+      "queryLines": [
+        "SELECT *\n",
+        "FROM clinical_trial_intelligence.gold.gold_visit_compliance\n",
+        "LIMIT 5;"
+      ]
+    },
+    {
+      "name": "173d6c1d",
+      "displayName": "visit_monitoring",
+      "queryLines": [
+        "SELECT\n",
+        "    study_id,\n",
+        "    site_id,\n",
+        "    visit_name,\n",
+        "    visit_number,\n",
+        "    subjects_with_visit,\n",
+        "    eligible_visits,\n",
+        "    completed_visits,\n",
+        "    missed_visits,\n",
+        "    rescheduled_visits,\n",
+        "    unknown_status_visits,\n",
+        "    visit_completion_rate,\n",
+        "    missed_visit_rate\n",
+        "FROM clinical_trial_intelligence.gold.gold_visit_compliance;"
+      ]
+    },
+    {
+      "name": "6346040a",
+      "displayName": "safety_lab_monitoring",
+      "queryLines": [
+        "SELECT\n",
+        "    subject_id,\n",
+        "    study_id,\n",
+        "    site_id,\n",
+        "    ae_count,\n",
+        "    serious_ae_count,\n",
+        "    fatal_ae_count,\n",
+        "    ongoing_ae_count,\n",
+        "    max_ae_severity,\n",
+        "    total_lab_results,\n",
+        "    abnormal_lab_count,\n",
+        "    abnormal_lab_rate,\n",
+        "    lab_flag_discrepancy_count\n",
+        "FROM clinical_trial_intelligence.gold.gold_subject_summary\n",
+        "limit 20"
+      ]
+    },
+    {
+      "name": "2829ba8a",
+      "displayName": "lab_monitoring",
+      "queryLines": [
+        "SELECT\n",
+        "    study_id,\n",
+        "    site_id,\n",
+        "    lab_test_code,\n",
+        "    lab_test_name,\n",
+        "    standard_unit,\n",
+        "    total_results,\n",
+        "    subjects_tested,\n",
+        "    abnormal_count,\n",
+        "    subjects_with_abnormal,\n",
+        "    abnormal_rate,\n",
+        "    source_derived_discrepancy_count,\n",
+        "    discrepancy_rate\n",
+        "FROM clinical_trial_intelligence.gold.gold_lab_monitoring;"
+      ]
+    },
+    {
+      "name": "8c9f366c",
+      "displayName": "visit",
+      "queryLines": [
+        "SELECT\n",
+        "    visit_name,\n",
+        "    MIN(visit_number) AS visit_number,\n",
+        "    SUM(completed_visits) AS completed_visits,\n",
+        "    SUM(eligible_visits) AS eligible_visits,\n",
+        "    SUM(completed_visits) * 1.0 /\n",
+        "        NULLIF(SUM(eligible_visits), 0) AS visit_completion_rate\n",
+        "FROM clinical_trial_intelligence.gold.gold_visit_compliance\n",
+        "GROUP BY visit_name\n",
+        "ORDER BY visit_number;"
+      ]
+    },
+    {
+      "name": "c478888e",
+      "displayName": "missed_visit_by_site",
+      "queryLines": [
+        "SELECT\n",
+        "    site_id,\n",
+        "    SUM(missed_visits) AS missed_visits,\n",
+        "    SUM(eligible_visits) AS eligible_visits,\n",
+        "    SUM(missed_visits) * 1.0 /\n",
+        "        NULLIF(SUM(eligible_visits), 0) AS missed_visit_rate\n",
+        "FROM clinical_trial_intelligence.gold.gold_visit_compliance\n",
+        "GROUP BY site_id\n",
+        "ORDER BY missed_visit_rate DESC;"
+      ]
+    },
+    {
+      "name": "aa5528a7",
+      "displayName": "clinical trial safety data snapshot",
+      "queryLines": [
+        "SELECT *\n",
+        "FROM clinical_trial_intelligence.gold.gold_safety_metrics\n",
+        "LIMIT 20;"
+      ]
+    },
+    {
+      "name": "47890edc",
+      "displayName": "ae_severity_summary",
+      "queryLines": [
+        "SELECT\n",
+        "    ae_severity,\n",
+        "    SUM(ae_events) AS ae_events,\n",
+        "    SUM(subjects_with_ae) AS subjects_with_ae\n",
+        "FROM clinical_trial_intelligence.gold.gold_safety_metrics\n",
+        "WHERE ae_severity IS NOT NULL\n",
+        "GROUP BY ae_severity\n",
+        "ORDER BY CASE ae_severity\n",
+        "    WHEN 'MILD' THEN 1\n",
+        "    WHEN 'MODERATE' THEN 2\n",
+        "    WHEN 'SEVERE' THEN 3\n",
+        "    WHEN 'LIFE_THREATENING' THEN 4\n",
+        "    ELSE 5\n",
+        "END;"
+      ]
+    },
+    {
+      "name": "7216826a",
+      "displayName": "serious_ae_by_site",
+      "queryLines": [
+        "SELECT\n",
+        "    study_id,\n",
+        "    site_id,\n",
+        "    SUM(ae_events) AS serious_ae_events\n",
+        "FROM clinical_trial_intelligence.gold.gold_safety_metrics\n",
+        "WHERE serious_flag = 'YES'\n",
+        "GROUP BY study_id, site_id\n",
+        "ORDER BY serious_ae_events DESC;"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "cdc1e189",
+      "displayName": "Study Overview",
+      "layout": [
+        {
+          "widget": {
+            "name": "enrolled-subjects",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "9f0d42ae",
+                  "fields": [
+                    {
+                      "name": "sum(enrolled_subjects)",
+                      "expression": "SUM(`enrolled_subjects`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### Enrolled Subjects",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(enrolled_subjects)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "cf46331b",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "9f0d42ae",
+                  "fields": [
+                    {
+                      "name": "sum(screen_fail_rate_pct)",
+                      "expression": "SUM(`screen_fail_rate_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### Screen Fail Rate",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(screen_fail_rate_pct)",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 2
+                    },
+                    "significantFigures": {
+                      "type": "exact",
+                      "figures": 3
+                    }
+                  },
+                  "formatTemplate": "{{ @formatted }}%"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "b5a4aadc",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "9f0d42ae",
+                  "fields": [
+                    {
+                      "name": "sum(discontinuation_rate_pct)",
+                      "expression": "SUM(`discontinuation_rate_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### Discontinuation Rate",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(discontinuation_rate_pct)",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 1
+                    }
+                  },
+                  "formatTemplate": "{{ @formatted }}%"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "b363f733",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "9f0d42ae",
+                  "fields": [
+                    {
+                      "name": "visit_completion_rate_pct",
+                      "expression": "`visit_completion_rate_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### Visit Completion Rate",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "visit_completion_rate_pct",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 1
+                    },
+                    "significantFigures": {
+                      "type": "exact",
+                      "figures": 3
+                    }
+                  },
+                  "formatTemplate": "{{ @formatted }}%"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "4f5d1ce8",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "9f0d42ae",
+                  "fields": [
+                    {
+                      "name": "sum(subjects_with_serious_ae)",
+                      "expression": "SUM(`subjects_with_serious_ae`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### <span style=\"font-size:18px\">**Subjects with ≥1 Serious AE**</span>",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(subjects_with_serious_ae)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "1ffbf660",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "91b03c63",
+                  "fields": [
+                    {
+                      "name": "sum(quarantine_rate)",
+                      "expression": "SUM(`quarantine_rate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### Quarantine Rate",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(quarantine_rate)",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 1
+                    },
+                    "significantFigures": {
+                      "type": "exact",
+                      "figures": 3
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 10,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "cumulative-enrollment",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "099bbc4b",
+                  "fields": [
+                    {
+                      "name": "monthly(enrollment_date)",
+                      "expression": "DATE_TRUNC(\"MONTH\", `enrollment_date`)"
+                    },
+                    {
+                      "name": "max(cumulative_enrolled)",
+                      "expression": "MAX(`cumulative_enrolled`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### Cumulative Enrollment",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "monthly(enrollment_date)",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "max(cumulative_enrolled)",
+                  "displayName": "Cumulative Subjects Enrolled",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "subject-disposition-funnel-1",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "4a06ba1a",
+                  "fields": [
+                    {
+                      "name": "stage",
+                      "expression": "`stage`"
+                    },
+                    {
+                      "name": "sum(subjects)",
+                      "expression": "SUM(`subjects`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### Subject Disposition Funnel",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "stage",
+                  "axis": {
+                    "title": "stage"
+                  },
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "custom-order",
+                      "orderedValues": [
+                        "Screened",
+                        "Enrolled",
+                        "Randomized"
+                      ]
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(subjects)",
+                  "axis": {
+                    "title": "subjects"
+                  },
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "site-study-summary-table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "db5457c6",
+                  "fields": [
+                    {
+                      "name": "study_id",
+                      "expression": "`study_id`"
+                    },
+                    {
+                      "name": "screened",
+                      "expression": "`screened`"
+                    },
+                    {
+                      "name": "enrolled",
+                      "expression": "`enrolled`"
+                    },
+                    {
+                      "name": "randomized",
+                      "expression": "`randomized`"
+                    },
+                    {
+                      "name": "screen_fail_pct",
+                      "expression": "`screen_fail_pct`"
+                    },
+                    {
+                      "name": "discontinuation_pct",
+                      "expression": "`discontinuation_pct`"
+                    },
+                    {
+                      "name": "visit_completion_pct",
+                      "expression": "`visit_completion_pct`"
+                    },
+                    {
+                      "name": "subjects_with_serious_ae",
+                      "expression": "`subjects_with_serious_ae`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### **Study Summary**",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "study_id"
+                  },
+                  {
+                    "fieldName": "screened",
+                    "contentAlignment": "center"
+                  },
+                  {
+                    "fieldName": "enrolled",
+                    "contentAlignment": "center"
+                  },
+                  {
+                    "fieldName": "randomized",
+                    "contentAlignment": "center"
+                  },
+                  {
+                    "fieldName": "screen_fail_pct",
+                    "contentAlignment": "center",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 1
+                      },
+                      "hideGroupSeparator": true
+                    },
+                    "formatTemplate": "{{ @formatted }}%"
+                  },
+                  {
+                    "fieldName": "discontinuation_pct",
+                    "contentAlignment": "center",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 1
+                      },
+                      "hideGroupSeparator": true
+                    },
+                    "formatTemplate": "{{ @formatted }}%"
+                  },
+                  {
+                    "fieldName": "visit_completion_pct",
+                    "contentAlignment": "center",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 1
+                      },
+                      "hideGroupSeparator": true
+                    },
+                    "formatTemplate": "{{ @formatted }}%"
+                  },
+                  {
+                    "fieldName": "subjects_with_serious_ae",
+                    "contentAlignment": "center",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 0
+                      },
+                      "hideGroupSeparator": true
+                    }
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 12,
+            "height": 5
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "e6e58bff",
+      "displayName": "Enrollment & Site Performance",
+      "layout": [
+        {
+          "widget": {
+            "name": "monthly-enrollment",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "530d48c3",
+                  "fields": [
+                    {
+                      "name": "monthly(enrollment_month)",
+                      "expression": "DATE_TRUNC(\"MONTH\", `enrollment_month`)"
+                    },
+                    {
+                      "name": "sum(monthly_enrollment)",
+                      "expression": "SUM(`monthly_enrollment`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### Monthly Enrollment",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "monthly(enrollment_month)",
+                  "displayName": "Enrollment Month",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(monthly_enrollment)",
+                  "displayName": "Monthly Enrolled Subjects",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "cumulative-enrollment-1",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "530d48c3",
+                  "fields": [
+                    {
+                      "name": "monthly(enrollment_month)",
+                      "expression": "DATE_TRUNC(\"MONTH\", `enrollment_month`)"
+                    },
+                    {
+                      "name": "sum(cumulative_enrollment)",
+                      "expression": "SUM(`cumulative_enrollment`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### Cumulative Enrollment",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "monthly(enrollment_month)",
+                  "displayName": "Enrollment Month",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(cumulative_enrollment)",
+                  "displayName": "Cumulative Subjects Enrolled",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 0,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "enrollment-by-site",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "aef35ee1",
+                  "fields": [
+                    {
+                      "name": "site_id",
+                      "expression": "`site_id`"
+                    },
+                    {
+                      "name": "sum(enrolled_subjects)",
+                      "expression": "SUM(`enrolled_subjects`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### Enrollment by Site",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "site_id",
+                  "displayName": "Site ID",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(enrolled_subjects)",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  },
+                  "displayName": "Enrolled Subjects",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "site-risk-scatter-plot",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "aef35ee1",
+                  "fields": [
+                    {
+                      "name": "study_id",
+                      "expression": "`study_id`"
+                    },
+                    {
+                      "name": "site_id",
+                      "expression": "`site_id`"
+                    },
+                    {
+                      "name": "enrolled_subjects",
+                      "expression": "`enrolled_subjects`"
+                    },
+                    {
+                      "name": "screen_fail_rate_pct",
+                      "expression": "`screen_fail_rate_pct`"
+                    },
+                    {
+                      "name": "discontinuation_rate_pct",
+                      "expression": "`discontinuation_rate_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### Site Risk Scatter Plot",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "mark": {
+                "opacity": 0.65
+              },
+              "widgetType": "scatter",
+              "encodings": {
+                "x": {
+                  "fieldName": "screen_fail_rate_pct",
+                  "displayName": "Screen Fail Rate (%)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "discontinuation_rate_pct",
+                  "displayName": "Discontinuation Rate (%)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "study_id",
+                  "formatTemplate": "{{ @formatted }}",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "size": {
+                  "fieldName": "enrolled_subjects",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "extra": [
+                  {
+                    "fieldName": "site_id"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 6,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "site-performance-table-1",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "aef35ee1",
+                  "fields": [
+                    {
+                      "name": "study_id",
+                      "expression": "`study_id`"
+                    },
+                    {
+                      "name": "site_id",
+                      "expression": "`site_id`"
+                    },
+                    {
+                      "name": "enrolled_subjects",
+                      "expression": "`enrolled_subjects`"
+                    },
+                    {
+                      "name": "screen_fail_rate_pct",
+                      "expression": "`screen_fail_rate_pct`"
+                    },
+                    {
+                      "name": "discontinuation_rate_pct",
+                      "expression": "`discontinuation_rate_pct`"
+                    },
+                    {
+                      "name": "visit_completion_rate_pct",
+                      "expression": "`visit_completion_rate_pct`"
+                    },
+                    {
+                      "name": "subjects_with_serious_ae",
+                      "expression": "`subjects_with_serious_ae`"
+                    }
+                  ],
+                  "disaggregated": true,
+                  "orders": [
+                    {
+                      "direction": "DESC",
+                      "expression": "`discontinuation_rate_pct`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### Site Performance Table",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "study_id"
+                  },
+                  {
+                    "fieldName": "site_id"
+                  },
+                  {
+                    "fieldName": "enrolled_subjects",
+                    "contentAlignment": "center"
+                  },
+                  {
+                    "fieldName": "screen_fail_rate_pct",
+                    "contentAlignment": "center",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 1
+                      },
+                      "hideGroupSeparator": true
+                    },
+                    "formatTemplate": "{{ @formatted }}%"
+                  },
+                  {
+                    "fieldName": "discontinuation_rate_pct",
+                    "contentAlignment": "center",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 1
+                      },
+                      "hideGroupSeparator": true
+                    },
+                    "formatTemplate": "{{ @formatted }}%"
+                  },
+                  {
+                    "fieldName": "visit_completion_rate_pct",
+                    "contentAlignment": "center",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 1
+                      },
+                      "hideGroupSeparator": true
+                    },
+                    "formatTemplate": "{{ @formatted }}%"
+                  },
+                  {
+                    "fieldName": "subjects_with_serious_ae",
+                    "contentAlignment": "center"
+                  }
+                ],
+                "rowOrder": [
+                  {
+                    "by": "column-reversed",
+                    "field": {
+                      "index": 4
+                    }
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 12,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "444e4fb9",
+      "displayName": "Patient & Visit Monitoring",
+      "layout": [
+        {
+          "widget": {
+            "name": "subject-status-1",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "b0b2783d",
+                  "fields": [
+                    {
+                      "name": "current_subject_status",
+                      "expression": "`current_subject_status`"
+                    },
+                    {
+                      "name": "count(subject_id)",
+                      "expression": "COUNT(`subject_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### Subject Status",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "current_subject_status",
+                  "displayName": "Subject Status",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "count(subject_id)",
+                  "displayName": "Subjects",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "visit-completion",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "8c9f366c",
+                  "fields": [
+                    {
+                      "name": "visit_name",
+                      "expression": "`visit_name`"
+                    },
+                    {
+                      "name": "visit_completion_rate",
+                      "expression": "`visit_completion_rate`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### **Visit Completion Rate by Visit**",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "visit_name",
+                  "axis": {
+                    "labelAngle": 45
+                  },
+                  "displayName": "Visit",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "custom-order",
+                      "orderedValues": [
+                        "SCREENING",
+                        "BASELINE",
+                        "WEEK_2",
+                        "WEEK_4",
+                        "WEEK_8",
+                        "WEEK_12",
+                        "WEEK_24",
+                        "EOT"
+                      ]
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "visit_completion_rate",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  },
+                  "displayName": "Visit Completion Rate (%)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 0,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "missed-visit-rate-site",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "c478888e",
+                  "fields": [
+                    {
+                      "name": "site_id",
+                      "expression": "`site_id`"
+                    },
+                    {
+                      "name": "missed_visit_rate",
+                      "expression": "`missed_visit_rate`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### Missed Visit Rate by Site",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "site_id",
+                  "displayName": "Site ID",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "missed_visit_rate",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  },
+                  "displayName": "Missed Visit Rate (%)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "visit-status",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "173d6c1d",
+                  "fields": [
+                    {
+                      "name": "study_id",
+                      "expression": "`study_id`"
+                    },
+                    {
+                      "name": "sum(completed_visits)",
+                      "expression": "SUM(`completed_visits`)"
+                    },
+                    {
+                      "name": "sum(missed_visits)",
+                      "expression": "SUM(`missed_visits`)"
+                    },
+                    {
+                      "name": "sum(rescheduled_visits)",
+                      "expression": "SUM(`rescheduled_visits`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### **Visit Status by Study**",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "mark": {
+                "layout": "stack"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "study_id",
+                  "displayName": "Study ID",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "fields": [
+                    {
+                      "fieldName": "sum(completed_visits)",
+                      "displayName": "Completed Visits"
+                    },
+                    {
+                      "fieldName": "sum(missed_visits)",
+                      "displayName": "Missed Visits"
+                    },
+                    {
+                      "fieldName": "sum(rescheduled_visits)",
+                      "displayName": "Rescheduled Visits"
+                    }
+                  ],
+                  "axis": {
+                    "title": "Number of Visits"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 6,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "subject-monitoring-drill-down",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "b0b2783d",
+                  "fields": [
+                    {
+                      "name": "subject_id",
+                      "expression": "`subject_id`"
+                    },
+                    {
+                      "name": "study_id",
+                      "expression": "`study_id`"
+                    },
+                    {
+                      "name": "site_id",
+                      "expression": "`site_id`"
+                    },
+                    {
+                      "name": "current_subject_status",
+                      "expression": "`current_subject_status`"
+                    },
+                    {
+                      "name": "total_visits",
+                      "expression": "`total_visits`"
+                    },
+                    {
+                      "name": "completed_visits",
+                      "expression": "`completed_visits`"
+                    },
+                    {
+                      "name": "missed_visit_pct",
+                      "expression": "`missed_visit_pct`"
+                    },
+                    {
+                      "name": "serious_ae_count",
+                      "expression": "`serious_ae_count`"
+                    },
+                    {
+                      "name": "abnormal_lab_rate",
+                      "expression": "`abnormal_lab_rate`"
+                    },
+                    {
+                      "name": "days_since_last_visit",
+                      "expression": "`days_since_last_visit`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### Subject Monitoring / Drill-down",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "subject_id"
+                  },
+                  {
+                    "fieldName": "study_id"
+                  },
+                  {
+                    "fieldName": "site_id"
+                  },
+                  {
+                    "fieldName": "current_subject_status"
+                  },
+                  {
+                    "fieldName": "total_visits"
+                  },
+                  {
+                    "fieldName": "completed_visits"
+                  },
+                  {
+                    "fieldName": "missed_visit_pct",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 1
+                      },
+                      "hideGroupSeparator": true
+                    },
+                    "formatTemplate": "{{ @formatted }}%"
+                  },
+                  {
+                    "fieldName": "serious_ae_count"
+                  },
+                  {
+                    "fieldName": "abnormal_lab_rate"
+                  },
+                  {
+                    "fieldName": "days_since_last_visit"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 12,
+            "height": 5
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "4e35d65a",
+      "displayName": "Safety & Lab Monitoring",
+      "layout": [
+        {
+          "widget": {
+            "name": "ae-severity",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "47890edc",
+                  "fields": [
+                    {
+                      "name": "ae_severity",
+                      "expression": "`ae_severity`"
+                    },
+                    {
+                      "name": "ae_events",
+                      "expression": "`ae_events`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### AE Severity",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "ae_severity",
+                  "displayName": "AE Severity",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "custom-order",
+                      "orderedValues": [
+                        "MILD",
+                        "MODERATE",
+                        "SEVERE",
+                        "LIFE_THREATENING"
+                      ]
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "ae_events",
+                  "displayName": "AE Events",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "serious-ae-by-site",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "7216826a",
+                  "fields": [
+                    {
+                      "name": "site_id",
+                      "expression": "`site_id`"
+                    },
+                    {
+                      "name": "serious_ae_events",
+                      "expression": "`serious_ae_events`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### **Serious AE Events by Site**",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "site_id",
+                  "displayName": "Site ID",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "serious_ae_events",
+                  "displayName": "Serious AE Events",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 0,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "abnormal-lab-rate",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "2829ba8a",
+                  "fields": [
+                    {
+                      "name": "study_id",
+                      "expression": "`study_id`"
+                    },
+                    {
+                      "name": "avg(discrepancy_rate)",
+                      "expression": "AVG(`discrepancy_rate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "###     Lab Data Discrepancy Rate by Study",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "study_id",
+                  "displayName": "Study ID",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "avg(discrepancy_rate)",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  },
+                  "displayName": "Lab Discrepancy Rate (%)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "site-lab-test-heatmap",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "2829ba8a",
+                  "fields": [
+                    {
+                      "name": "avg(discrepancy_rate)",
+                      "expression": "AVG(`discrepancy_rate`)"
+                    },
+                    {
+                      "name": "lab_test_code",
+                      "expression": "`lab_test_code`"
+                    },
+                    {
+                      "name": "site_id",
+                      "expression": "`site_id`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### **Site × Lab Test Discrepancy Heatmap**",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "heatmap",
+              "encodings": {
+                "x": {
+                  "fieldName": "lab_test_code",
+                  "displayName": "Lab Test",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "site_id",
+                  "displayName": "Site ID",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "color": {
+                  "fieldName": "avg(discrepancy_rate)",
+                  "displayName": "Discrepancy Rate (%)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 6,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "laborarty",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "6346040a",
+                  "fields": [
+                    {
+                      "name": "subject_id",
+                      "expression": "`subject_id`"
+                    },
+                    {
+                      "name": "study_id",
+                      "expression": "`study_id`"
+                    },
+                    {
+                      "name": "site_id",
+                      "expression": "`site_id`"
+                    },
+                    {
+                      "name": "ae_count",
+                      "expression": "`ae_count`"
+                    },
+                    {
+                      "name": "serious_ae_count",
+                      "expression": "`serious_ae_count`"
+                    },
+                    {
+                      "name": "max_ae_severity",
+                      "expression": "`max_ae_severity`"
+                    },
+                    {
+                      "name": "total_lab_results",
+                      "expression": "`total_lab_results`"
+                    },
+                    {
+                      "name": "abnormal_lab_count",
+                      "expression": "`abnormal_lab_count`"
+                    },
+                    {
+                      "name": "lab_flag_discrepancy_count",
+                      "expression": "`lab_flag_discrepancy_count`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### **Subject Safety & Lab Detail**",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "subject_id",
+                    "displayName": "Subject ID"
+                  },
+                  {
+                    "fieldName": "study_id",
+                    "displayName": "Study ID"
+                  },
+                  {
+                    "fieldName": "site_id",
+                    "displayName": "Site ID"
+                  },
+                  {
+                    "fieldName": "ae_count",
+                    "displayName": "AE Count"
+                  },
+                  {
+                    "fieldName": "serious_ae_count",
+                    "displayName": "Serious AE Count"
+                  },
+                  {
+                    "fieldName": "max_ae_severity",
+                    "displayName": "Max AE Severity"
+                  },
+                  {
+                    "fieldName": "total_lab_results",
+                    "displayName": "Lab Results"
+                  },
+                  {
+                    "fieldName": "abnormal_lab_count",
+                    "displayName": "Abnormal Lab Count"
+                  },
+                  {
+                    "fieldName": "lab_flag_discrepancy_count",
+                    "displayName": "Lab Discrepancies"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 12,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "ec633d7b",
+      "displayName": "Data Quality & Operational Risk",
+      "layout": [
+        {
+          "widget": {
+            "name": "quarantine-rate-1",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "12422788",
+                  "fields": [
+                    {
+                      "name": "measure(Overall Quarantine Rate)",
+                      "expression": "MEASURE(`Overall Quarantine Rate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "showDescription": false,
+                "title": {
+                  "value": "### Quarantine Rate",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Overall Quarantine Rate)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "756d0405",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "865ba12a",
+                  "fields": [
+                    {
+                      "name": "sum(failed_rules)",
+                      "expression": "SUM(`failed_rules`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "showDescription": false,
+                "title": {
+                  "value": "### **Distinct DQ Rules Triggered**",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(failed_rules)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 4,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "5526dce5",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "8e4fe4cb",
+                  "fields": [
+                    {
+                      "name": "sum(reconciled_entities)",
+                      "expression": "SUM(`reconciled_entities`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "showDescription": false,
+                "title": {
+                  "value": "### **Entities Reconciled**",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(reconciled_entities)",
+                  "formatTemplate": "",
+                  "style": {
+                    "fontFamily": "Arial"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 4,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "quarantine-by-entity-1",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "603b6bdd",
+                  "fields": [
+                    {
+                      "name": "source_entity",
+                      "expression": "`source_entity`"
+                    },
+                    {
+                      "name": "sum(quarantine_rate)",
+                      "expression": "SUM(`quarantine_rate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### Quarantine Rate by Source Entity",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "source_entity",
+                  "formatTemplate": "{{ @formatted }}",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(quarantine_rate)",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 1
+                    }
+                  },
+                  "displayName": "Quarantine Rate",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "bronze-silver-quarantine-reconciliation",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "603b6bdd",
+                  "fields": [
+                    {
+                      "name": "source_entity",
+                      "expression": "`source_entity`"
+                    },
+                    {
+                      "name": "bronze_records",
+                      "expression": "`bronze_records`"
+                    },
+                    {
+                      "name": "silver_records",
+                      "expression": "`silver_records`"
+                    },
+                    {
+                      "name": "quarantined_records",
+                      "expression": "`quarantined_records`"
+                    },
+                    {
+                      "name": "quarantine_rate",
+                      "expression": "TRY_CAST(`quarantine_rate` AS DECIMAL)"
+                    },
+                    {
+                      "name": "reconciled_flag",
+                      "expression": "`reconciled_flag`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### Bronze → Silver → Quarantine Reconciliation",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "source_entity",
+                    "displayName": "Source Entity"
+                  },
+                  {
+                    "fieldName": "bronze_records",
+                    "contentAlignment": "center",
+                    "displayName": "Bronze Records"
+                  },
+                  {
+                    "fieldName": "silver_records",
+                    "contentAlignment": "center",
+                    "displayName": "Silver Records"
+                  },
+                  {
+                    "fieldName": "quarantined_records",
+                    "contentAlignment": "center",
+                    "displayName": "Quarantined Records"
+                  },
+                  {
+                    "fieldName": "quarantine_rate",
+                    "contentAlignment": "center",
+                    "format": {
+                      "type": "number-percent",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 1
+                      },
+                      "hideGroupSeparator": true
+                    },
+                    "displayName": "Quarantine Rate"
+                  },
+                  {
+                    "fieldName": "reconciled_flag",
+                    "format": {
+                      "type": "alias",
+                      "mappings": []
+                    },
+                    "contentAlignment": "center",
+                    "displayName": "Reconciled",
+                    "formatTemplate": "{{ @formatted }}"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 10,
+            "width": 12,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "top-dq-failure-reasons",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "52da1028",
+                  "fields": [
+                    {
+                      "name": "sum(failure_count)",
+                      "expression": "SUM(`failure_count`)"
+                    },
+                    {
+                      "name": "dq_rule",
+                      "expression": "`dq_rule`"
+                    }
+                  ],
+                  "disaggregated": false,
+                  "orders": [
+                    {
+                      "direction": "DESC",
+                      "expression": "SUM(`failure_count`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "### **Top 10 DQ Failure Rules**",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "sum(failure_count)",
+                  "axis": {
+                    "title": "Rule Failures"
+                  },
+                  "displayName": "Rule Failures",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "dq_rule",
+                  "axis": {
+                    "title": "DQ Failure Rule"
+                  },
+                  "formatTemplate": "{{ @formatted }}",
+                  "displayName": "DQ Failure Rule",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "measure-reversed",
+                      "measure": {
+                        "fieldName": "sum(failure_count)"
+                      }
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 4,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "09c63aad",
+      "displayName": "Global Filters",
+      "layout": [
+        {
+          "widget": {
+            "name": "33134682",
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {},
+              "frame": {
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}
