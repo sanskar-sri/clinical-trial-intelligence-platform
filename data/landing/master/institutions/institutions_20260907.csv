@@ -1,0 +1,40 @@
+institution_id,institution_name,city,country,region
+INST-0001,Delhi General Hospital,Delhi,India,APAC
+INST-0002,Houston Teaching Hospital,Houston,United States,NAM
+INST-0003,Barcelona General Hospital,Barcelona,Spain,EMEA
+INST-0004,Kolkata Institute of Clinical Research,Kolkata,India,APAC
+INST-0005,Chicago Medical Center,Chicago,United States,NAM
+INST-0006,Madrid University Hospital,Madrid,Spain,EMEA
+INST-0007,Leeds Teaching Hospital,Leeds,United Kingdom,EMEA
+INST-0008,Chicago University Hospital,Chicago,United States,NAM
+INST-0009,Berlin Clinical Research Center,Berlin,Germany,EMEA
+INST-0010,Sao Paulo Medical Center,Sao Paulo,Brazil,LATAM
+INST-0011,Tokyo General Hospital,Tokyo,Japan,APAC
+INST-0012,Bengaluru Institute of Clinical Research,Bengaluru,India,APAC
+INST-0013,London Specialty Clinic,London,United Kingdom,EMEA
+INST-0014,Durham Teaching Hospital,Durham,United States,NAM
+INST-0015,Munich Specialty Clinic,Munich,Germany,EMEA
+INST-0016,Porto Alegre University Hospital,Porto Alegre,Brazil,LATAM
+INST-0017,Osaka Medical Center,Osaka,Japan,APAC
+INST-0018,Bengaluru Institute of Clinical Research,Bengaluru,India,APAC
+INST-0019,Krakow Specialty Clinic,Krakow,Poland,EMEA
+INST-0020,Mumbai Clinical Research Center,Mumbai,India,APAC
+INST-0021,Warsaw Institute of Clinical Research,Warsaw,Poland,EMEA
+INST-0022,Mumbai Teaching Hospital,Mumbai,India,APAC
+INST-0023,Boston Specialty Clinic,Boston,United States,NAM
+INST-0024,Cape Town Clinical Research Center,Cape Town,South Africa,EMEA
+INST-0025,Tokyo Specialty Clinic,Tokyo,Japan,APAC
+INST-0026,Toronto Specialty Clinic,Toronto,Canada,NAM
+INST-0027,Delhi University Hospital,Delhi,India,APAC
+INST-0028,Manchester Clinical Research Center,Manchester,United Kingdom,EMEA
+INST-0029,Houston Institute of Clinical Research,Houston,United States,NAM
+INST-0030,Johannesburg Teaching Hospital,Johannesburg,South Africa,EMEA
+INST-0031,Osaka Specialty Clinic,Osaka,Japan,APAC
+INST-0032,Toronto Specialty Clinic,Toronto,Canada,NAM
+INST-0033,Manchester Institute of Clinical Research,Manchester,United Kingdom,EMEA
+INST-0034,Leeds Institute of Clinical Research,Leeds,United Kingdom,EMEA
+INST-0035,Manchester Clinical Research Center,Manchester,United Kingdom,EMEA
+INST-0036,Sydney Institute of Clinical Research,Sydney,Australia,APAC
+INST-0037,Mexico City Teaching Hospital,Mexico City,Mexico,LATAM
+INST-0038,Bengaluru Specialty Clinic,Bengaluru,India,APAC
+INST-0039,Melbourne Medical Center,Melbourne,Australia,APAC

@@ -1,0 +1,7 @@
+product_id,sponsor_id,product_code,product_name,active_ingredient,modality,mechanism_of_action,product_status
+PRD-001,SPN-01,NW-4471,Rasotinib,rasotinib maleate,SMALL_MOLECULE,EGFR tyrosine kinase inhibitor,INVESTIGATIONAL
+PRD-002,SPN-02,AR-2210,Solvimab,solvimab,BIOLOGIC,Anti-IL-13 monoclonal antibody,INVESTIGATIONAL
+PRD-003,SPN-03,KP-1180,Nevagliflozin,nevagliflozin,SMALL_MOLECULE,SGLT2 inhibitor,INVESTIGATIONAL
+PRD-004,SPN-01,NW-6082,Meridumab,meridumab,BIOLOGIC,Anti-amyloid monoclonal antibody,INVESTIGATIONAL
+PRD-901,SPN-02,DOCE,Docetaxel,docetaxel,SMALL_MOLECULE,Microtubule inhibitor,MARKETED
+PRD-999,-,PBO,Placebo,none,PLACEBO,None,PLACEBO
