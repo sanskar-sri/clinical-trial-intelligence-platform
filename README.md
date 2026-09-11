@@ -1,1036 +1,495 @@
-Yes. At this stage your Bronze + Silver architecture and Silver pipeline implementation are essentially complete, with Silver validation being the next step.
-
-Below is a README you can paste into your repository’s README.md.
-
 # Clinical Trial Intelligence Platform
-An end-to-end clinical trial data engineering and analytics platform built using AWS S3, Databricks, Unity Catalog, and Lakeflow Declarative Pipelines.
-The project implements a medallion architecture for ingesting, standardizing, validating, governing, and preparing clinical operational data for downstream analytics.
-> Current project status: Bronze and Silver implemented. Silver validation and Gold analytical modeling are the next stages.
+
+An end-to-end clinical trial data platform built on AWS S3, Databricks, Unity Catalog,
+Delta Lake and Lakeflow Declarative Pipelines.
+
+The platform ingests multi-source clinical trial operational data (EDC, CTMS, laboratory,
+safety, master/reference), standardises and validates it against clinical business rules,
+quarantines records that cannot be trusted, and publishes analytics-ready Gold datasets
+and an AI/BI dashboard for study, site, safety and data-quality monitoring.
+
+> **All data in this repository is synthetically generated.** No real patient, subject,
+> site or sponsor data is present, and none of the identifiers correspond to real people
+> or organisations.
+
+**Status:** Bronze → Silver → Gold implemented, orchestrated as a single Lakeflow Job,
+and executing end-to-end. Dashboard built on the Gold layer.
+
 ---
-# 1. Project Objective
-Clinical trial operational data is typically distributed across multiple systems such as:
-- Clinical Trial Management Systems (CTMS)
-- Electronic Data Capture (EDC)
-- Laboratory systems
-- Safety systems
-- Master/reference datasets
-These systems produce data with different schemas, naming conventions, update patterns, and data-quality characteristics.
-The objective of this project is to build a governed data platform that:
-1. ingests heterogeneous clinical trial source data,
-2. preserves raw source records,
-3. standardizes clinical entities,
-4. validates business and referential-integrity rules,
-5. quarantines invalid records,
-6. maintains subject history,
-7. standardizes laboratory measurements,
-8. prepares trusted datasets for clinical-trial analytics.
+
+## 1. Why this project exists
+
+Clinical trial operations generate data across independent systems — EDC captures subject
+and visit activity, CTMS holds study and site operations, central labs return measurements,
+safety systems record adverse events, and master data defines sponsors, products and
+institutions. These feeds arrive at different frequencies, with different schemas,
+different terminology for the same concept, and different data quality.
+
+The engineering problem is not file ingestion. It is producing a governed layer where
+study, site, subject and visit data can be reconciled, where invalid records are visible
+rather than silently dropped, and where every analytical number can be traced back to the
+source file that produced it.
+
 ---
-# 2. Architecture
+
+## 2. Architecture
+
 ```text
-Source Systems
-     │
-     ├── CTMS
-     ├── EDC
-     ├── Laboratory
-     ├── Safety
-     └── Master / Reference Data
-     │
-     ▼
-AWS S3
-Landing/
-     │
-     ▼
-Databricks
-Lakeflow Declarative Pipelines
-     │
-     ▼
-┌─────────────────────────────────────────┐
-│                BRONZE                   │
-│                                         │
-│ Raw source representation               │
-│ Source lineage                          │
-│ Ingestion metadata                      │
-│ Schema rescue                           │
-└──────────────────┬──────────────────────┘
+  EDC        CTMS       Laboratory     Safety      Master / Reference
+   │           │            │             │               │
+   └───────────┴────────────┴─────────────┴───────────────┘
+                             │
+                             ▼
+                  AWS S3 — Landing zone
+                   (CSV, date-versioned)
+                             │
+                    Unity Catalog external location
+                             │
+                             ▼
+        ┌────────────────────────────────────────────┐
+        │ BRONZE — clinical-trial-bronze             │
+        │ Auto Loader streaming + materialised views │
+        │ Source preservation, ingestion lineage     │
+        └────────────────────┬───────────────────────┘
+                             ▼
+        ┌────────────────────────────────────────────┐
+        │ SILVER — clinical-trial-silver             │
+        │ Typing, key normalisation, reference       │
+        │ standardisation, referential integrity,    │
+        │ clinical DQ rules, CDC / SCD Type 2        │
+        └──────────┬──────────────────────┬──────────┘
+                   ▼                      ▼
+             valid records          failed DQ rules
+                   │                      │
+                   ▼                      ▼
+                SILVER                QUARANTINE
                    │
                    ▼
-┌─────────────────────────────────────────┐
-│                SILVER                   │
-│                                         │
-│ Type conversion                         │
-│ Key normalization                       │
-│ Reference standardization               │
-│ Referential integrity                   │
-│ Clinical DQ validation                  │
-│ CDC / SCD Type 2                        │
-└───────────────┬─────────────────────────┘
-                │
-        ┌───────┴────────┐
-        ▼                ▼
-   Valid Records     Invalid Records
-        │                │
-        ▼                ▼
-     SILVER          QUARANTINE
-        │
-        ▼
-       GOLD
-        │
-        ▼
-Clinical Trial Analytics / KPIs
+        ┌────────────────────────────────────────────┐
+        │ GOLD — clinical-trial-gold                 │
+        │ Subject spine, enrolment, site performance,│
+        │ visit compliance, safety, lab monitoring,  │
+        │ DQ metrics, reconciliation                 │
+        └────────────────────┬───────────────────────┘
+                             ▼
+              AI/BI dashboard — 5 pages
+     Study · Enrolment & Sites · Patient & Visits ·
+        Safety & Labs · Data Quality & Risk
+```
 
-Gold modeling is the next development stage.
+---
 
-⸻
+## 3. Technology stack
 
-3. Technology Stack
+| Layer | Technology |
+|---|---|
+| Cloud | AWS |
+| Object storage | Amazon S3 |
+| Data platform | Databricks (serverless compute) |
+| Governance | Unity Catalog |
+| Pipelines | Lakeflow Declarative Pipelines |
+| Orchestration | Lakeflow Jobs |
+| Ingestion | Databricks Auto Loader (`cloudFiles`) |
+| Table format | Delta Lake (Unity Catalog managed tables) |
+| Processing | Apache Spark / PySpark, SQL |
+| CDC | `create_auto_cdc_flow()` — SCD Type 2 |
+| BI | Databricks AI/BI dashboards |
+| Version control | Git |
 
-Layer	Technology
-Cloud	AWS
-Object Storage	Amazon S3
-Data Platform	Databricks
-Governance	Unity Catalog
-Pipeline Framework	Lakeflow Declarative Pipelines
-Processing	Apache Spark / PySpark
-Storage Format	Delta Lake
-Transformation	Python + SQL
-CDC	AUTO CDC
-Data Quality	Rule-based validation + quarantine
-Version Control	Git
-Source Storage	S3 Landing Zone
-Managed Storage	Unity Catalog managed storage
+---
 
-⸻
+## 4. Orchestration
 
-4. Repository Structure
+Transformation logic and workflow control are deliberately separated. Each medallion layer
+is its own Lakeflow pipeline, which resolves dataset dependencies declaratively. A Lakeflow
+Job sequences the three pipelines and enforces the cross-layer dependency.
 
+**Job:** `clinical-trial-intelligence-workflow`
+
+```text
+          bronze_ingestion            silver_transformation            gold_transformation
+       clinical-trial-bronze  ──▶   clinical-trial-silver     ──▶   clinical-trial-gold
+              1m 14s                        2m 02s                         1m 12s
+                              all-succeeded dependency between tasks
+```
+
+Latest full refresh: **4m 30s end-to-end**, all three tasks succeeded, serverless compute
+with performance-optimised mode enabled.
+
+A third pipeline was not created just to run Bronze then Silver then Gold. A pipeline
+expresses relationships between *datasets*; a job expresses relationships between *tasks*.
+Collapsing the two would put orchestration logic inside a transformation graph.
+
+---
+
+## 5. Repository structure
+
+```text
 clinical-trial-intelligence-platform/
 │
-├── data/
+├── data/landing/              synthetic source files, organised by source system
+│   ├── ctms/                  sites, studies
+│   ├── edc/                   subjects, visits (date-versioned deltas)
+│   ├── lab/                   lab_results
+│   ├── safety/                adverse_events
+│   ├── master/                institutions, products, sponsors
+│   └── protocol/              study_arms
 │
 ├── src/
-│   │
-│   ├── notebook/
-│   │   └── exploration/
+│   ├── setup/                 create_schemas.sql — catalog & schema DDL
 │   │
 │   ├── pipelines/
 │   │   ├── bronze/
-│   │   └── silver/
-│   │       ├── dimensions.sql
-│   │       ├── subjects.py
-│   │       ├── visits.py
-│   │       ├── lab_results.py
-│   │       └── adverse_events.py
+│   │   │   ├── streaming/     4 Auto Loader ingestion modules
+│   │   │   └── materialized/  13 master / reference modules
+│   │   ├── silver/
+│   │   │   ├── dimensions.sql dimensions + reference standardisation
+│   │   │   ├── subjects.py    AUTO CDC, SCD Type 2
+│   │   │   ├── visits.py
+│   │   │   ├── lab_results.py
+│   │   │   └── adverse_events.py
+│   │   └── gold/              9 analytical modules
 │   │
-│   ├── setup/
-│   │   └── create_schemas.sql
-│   │
-│   ├── Utility/
+│   ├── utils/                 shared transformation contracts
 │   │   ├── bronze_common.py
 │   │   ├── bronze_materialized_common.py
 │   │   └── silver_common.py
 │   │
-│   └── Validation/
-│       ├── bronze/
-│       │   └── bronze_validation.sql
-│       │
-│       └── silver/
-│           ├── silver_validation.sql
-│           ├── subjects_validation
-│           └── visits_validation
+│   ├── notebooks/exploration/ design proof-of-work (see §11)
+│   └── validation/            post-run validation, by layer
 │
+├── dashboard/                 AI/BI dashboard definition (.lvdash.json)
 └── README.md
+```
 
-⸻
+Three directories, three different questions:
 
-5. AWS S3 Storage Architecture
+| Directory | Question it answers |
+|---|---|
+| `notebooks/exploration/` | What is actually in this data? |
+| `pipelines/` | What should be done to it? |
+| `validation/` | Did what was built produce the correct result? |
 
-The platform uses the S3 bucket:
+---
 
-clinical-trial-intelligence-platform-sk
+## 6. Governance and storage
 
-Logical storage organization:
+**Catalog:** `clinical_trial_intelligence`
+**Schemas:** `bronze`, `silver`, `quarantine`, `gold`
 
-clinical-trial-intelligence-platform-sk/
-│
-├── Landing/
-│   │
-│   ├── source datasets
-│   └── reference datasets
-│
-└── UnityManaged/
-    │
-    ├── bronze/
-    ├── silver/
-    ├── quarantine/
-    └── gold/
+Landing data and managed analytical storage are separated at the bucket level:
 
-Landing/ represents externally supplied source data.
+```text
+s3://clinical-trial-intelligence-platform-sk/
+├── Landing/          externally delivered source files (external location)
+└── UnityManaged/     Unity Catalog managed storage root
+    ├── bronze/  ├── silver/  ├── quarantine/  └── gold/
+```
 
-UnityManaged/ is governed through Unity Catalog and stores managed analytical datasets.
+Databricks reaches S3 through Unity Catalog external locations rather than credentials
+embedded in transformation code. Consumers query `clinical_trial_intelligence.bronze.edc_subjects`,
+never the underlying `__unitystorage` UUID paths — the table name is the governed interface
+and Unity Catalog owns the physical layout.
 
-Unity Catalog controls the actual internal storage structure for managed tables.
+---
 
-⸻
+## 7. Bronze layer
 
-6. Unity Catalog Organization
+Bronze answers one question: *what did the source system send?* No business harmonisation
+happens here, because correcting data during ingestion makes it impossible to tell later
+whether an anomaly came from the source, the ingestion, or the transformation.
 
-The project uses:
+**17 datasets**, ingested through two patterns:
 
-Catalog:
-clinical_trial_intelligence
+*Streaming (Auto Loader, incremental file discovery):*
+`edc_subjects`, `edc_visits`, `lab_results`, `safety_adverse_events`
 
-with the following schemas:
+*Materialised views (small master / reference feeds):*
+`ctms_sites`, `ctms_studies`, `master_institutions`, `master_products`, `master_sponsors`,
+`protocol_study_arms`, `ref_country_region`, `ref_diagnosis_mapping`, `ref_geography`,
+`ref_lab_test`, `ref_severity_mapping`, `ref_sex_mapping`, `ref_unit_mapping`
 
-clinical_trial_intelligence
-│
-├── bronze
-├── silver
-├── quarantine
-└── gold
+Every Bronze record carries ingestion lineage — `_source_file`, `_source_file_name`,
+`_source_file_modification_ts`, `_ingestion_ts`, `_ingestion_date` — so any Silver or Gold
+number can be traced back to the file that produced it.
 
-Responsibilities:
+**Validated Bronze volumes**
 
-Bronze
+| Table | Rows | Source files |
+|---|---:|---:|
+| `edc_subjects` | 3,829 | 9 |
+| `edc_visits` | 18,262 | 10 |
+| `lab_results` | 65,006 | 10 |
+| `safety_adverse_events` | 1,952 | 10 |
+| `ctms_sites` | 45 | 1 |
+| `ctms_studies` | 6 | 1 |
 
-Raw source-system representation.
+---
 
-Silver
+## 8. Silver layer
 
-Cleaned, standardized, validated, and conformed clinical data.
+Silver answers: *what is the standardised, trustworthy representation?* It produces 13
+dimension/reference datasets, 4 validated clinical entities, and 4 matching quarantine
+datasets.
 
-Quarantine
+### 8.1 Business-key normalisation contract
 
-Records rejected by blocking Silver data-quality rules.
+All primary and foreign business keys pass through one shared contract in
+`src/utils/silver_common.py`, so joins have consistent semantics everywhere:
 
-Gold
+```text
+TRIM  →  blank / "-" → NULL  →  UPPER
 
-Business-ready analytical datasets and clinical-trial KPIs.
+" sub-001 " → "SUB-001"      "" → NULL      "-" → NULL
+```
 
-Gold implementation is pending.
+### 8.2 Deterministic reference resolution
 
-⸻
+Reference datasets contain case variants that collapse to the same normalised key
+(`M`, `m`, `MALE`, `Male`). Joining a source row against an un-deduplicated reference turns
+one subject into several rows, which then violates CDC business-key uniqueness — this was a
+real pipeline failure during development, and the fix was applied at the reference boundary
+rather than by dropping duplicates downstream.
 
-7. Bronze Layer
+Reference resolution therefore normalises and deduplicates before joining, and uses
+deterministic aggregation instead of `FIRST()` over an unordered distributed group.
+Conflict checks across all six reference mappings — sex, diagnosis, site→study, lab test,
+unit conversion, severity — return **0 conflicting mappings**.
 
-The Bronze layer preserves source-system data while adding ingestion and lineage metadata.
+Values with no reference match become `UNMAPPED` rather than `NULL`, so unknown source
+values stay visible to data-quality checks.
 
-Current Bronze datasets include:
+### 8.3 Dimensions and references
 
-ctms_sites
-ctms_studies
-edc_subjects
-edc_visits
-lab_results
-safety_adverse_events
-master_institutions
-master_products
-master_sponsors
-protocol_study_arms
-ref_country_region
-ref_diagnosis_mapping
-ref_geography
-ref_lab_test
-ref_severity_mapping
-ref_sex_mapping
-ref_unit_mapping
+`dim_institution`, `dim_sponsor`, `dim_product`, `dim_site`, `dim_study`, `dim_study_arm`,
+`ref_country_region`, `ref_geography`, `ref_diagnosis`, `ref_lab_test`, `ref_severity`,
+`ref_sex`, `ref_unit`
 
-Bronze records also preserve operational metadata such as:
+`dim_site` resolves region through `city + country` → `ref_geography`, falling back to
+country-level `ref_country_region`, and finally to `UNMAPPED` — so unresolved geography
+cannot silently vanish from regional rollups.
 
-_source_file
-_source_file_name
-_source_file_modification_ts
-_ingestion_ts
-_ingestion_date
-_rescued_data
+### 8.4 Subjects — CDC and SCD Type 2
 
-where applicable.
+The EDC subject feed is **not** a series of complete snapshots. An initial population file
+is followed by incremental change files, which is why the pipeline uses
+`create_auto_cdc_flow()` with SCD Type 2 rather than snapshot-comparison CDC.
 
-This provides traceability from a Silver record back to its original source file.
+| Property | Value |
+|---|---|
+| Source | `bronze.edc_subjects` |
+| Business key | `subject_id` |
+| Sequence | `struct(source_snapshot_date, _source_file_name)` |
+| History | SCD Type 2 (`__START_AT` / `__END_AT`) |
+| Target | `silver.subjects` / `quarantine.subjects` |
 
-⸻
+`source_snapshot_date` is derived from the filename (`subjects_YYYYMMDD.csv`) because
+`_ingestion_ts` is identical across files processed in one run, and file modification order
+does not match logical snapshot order. The filename is the deterministic tie-breaker.
+
+Ingestion metadata is excluded from history tracking via `track_history_except_column_list`.
+A new source file changes `_source_file_name` on every snapshot; if that counted as a change,
+the table would accumulate `ENROLLED → ENROLLED → ENROLLED` history for subjects that never
+changed. History tracks business change only.
 
-8. Silver Design Principles
+Because the sequencing expression is a compound source-ordering structure, `__START_AT` /
+`__END_AT` represent *source change ordering*, not clinical effective dates — so clinical
+dates such as `visit_date` or `onset_date` are never compared against SCD boundaries.
 
-Silver performs more than basic cleaning.
+### 8.5 Visits, lab results and adverse events
 
-It implements:
+All three were profiled before implementation rather than copied from `subjects.py`.
 
-Raw Bronze record
-       │
-       ▼
-Type conversion
-       │
-       ▼
-Business-key normalization
-       │
-       ▼
-Reference standardization
-       │
-       ▼
-Entity resolution
-       │
-       ▼
-Referential-integrity validation
-       │
-       ▼
-Clinical business-rule validation
-       │
-       ├──────── Valid ────────► Silver
-       │
-       └──────── Invalid ──────► Quarantine
+| Entity | Grain | Key behaviour | Strategy |
+|---|---|---|---|
+| `visits` | 1 row = 1 subject visit | `visit_id` unique, never reissued across files | append-only streaming, no CDC |
+| `lab_results` | 1 row = 1 measurement | `lab_result_id` unique | append-only, no CDC |
+| `adverse_events` | 1 row = 1 AE | `ae_id` complete and unique | append-only, no CDC |
 
-⸻
+**Laboratory standardisation.** Measurements arrive in mixed units and are standardised
+through `ref_lab_test` and `ref_unit`:
 
-9. Canonical Business-Key Normalization
+```text
+standardized_result_value = result_value × conversion_factor
+```
 
-A shared Silver normalization contract is used for business identifiers.
+Both the original and standardised value/unit are retained. Abnormality is *derived* from
+the standardised measurement against the standard reference range rather than trusting the
+source `abnormal_flag` — the two disagree on 10,373 rows. The source flag is kept for
+lineage and exposed through a discrepancy indicator, so the disagreement is auditable
+instead of silently overwritten.
 
-The transformation is:
+**Severity vs seriousness.** `ref_severity` maps 9 source spellings to MILD / MODERATE /
+SEVERE. Clinical severity and regulatory seriousness are modelled as separate concepts;
+`serious_flag` is normalised to YES/NO independently. A Grade 4 event is not automatically
+regulatory-serious.
 
-TRIM
-  ↓
-blank / "-" → NULL
-  ↓
-UPPER
+### 8.6 Referential integrity against Silver, not Bronze
 
-Example:
+Clinical facts validate against trusted Silver entities — for subjects, the current SCD
+version (`__END_AT IS NULL`) — never against raw Bronze. Otherwise an invalid Bronze subject
+would legitimise every visit, lab result and adverse event hanging off it.
 
-" sub-001 "  →  "SUB-001"
-""           →  NULL
-"-"          →  NULL
-NULL         →  NULL
+### 8.7 Blocking rules vs warning flags
 
-The same normalization is applied to primary and foreign business keys so joins use consistent semantics.
+Not every clinical oddity should reject a record.
 
-Reusable transformations are maintained in:
+```text
+DQ failure        → record is structurally untrustworthy  → quarantine
+Clinical warning  → record is unusual but plausible       → retain + flag for review
+```
 
-src/Utility/silver_common.py
+Blocking rules cover missing or unknown business keys, referential integrity failures,
+cross-entity mismatches (subject–study, subject–site, visit–subject), out-of-range values,
+unmappable reference values, and impossible date sequences (enrolment before screening,
+randomisation before enrolment, discontinuation before randomisation).
 
-including:
+Warning flags cover severity mapping anomalies, resolution before onset, high-severity
+non-serious events, mild serious events, and fatal non-serious events.
 
-blank_to_null()
-normalize_key()
+Visit-date validation is status-aware: a missing `visit_date` is invalid for a completed
+visit but legitimate for `MISSED` or `RESCHEDULED`.
 
-⸻
+### 8.8 Quarantine
 
-10. Deterministic Reference Resolution
+Every clinical pipeline follows the same shape: validated temp view → valid stream +
+quarantine table. Quarantine records preserve the original business attributes, source
+lineage, a `_dq_failures` array holding **every** failed rule rather than only the first,
+human-readable reasons, and a quarantine timestamp.
 
-Reference datasets can contain duplicate normalized lookup keys.
+**Silver outcome**
 
-Using an unordered aggregation such as FIRST() after a distributed GROUP BY can produce non-deterministic results.
+| Entity | Valid | Quarantined | Notes |
+|---|---:|---:|---|
+| `subjects` | 3,640 | 186 | current SCD version |
+| `visits` | 17,942 | 320 | 218 missing `subject_id`, 102 missing `visit_date`, no overlap |
+| `lab_results` | 62,401 | 2,605 | 389 rows failed more than one rule |
+| `adverse_events` | **TBD** | **TBD** | fill from `gold_reconciliation` |
 
-The Silver implementation therefore uses deterministic aggregation where the lookup key is expected to functionally determine its attributes.
+---
 
-Reference-conflict validation was performed for:
+## 9. Gold layer
 
-sex mapping
-diagnosis mapping
-site → study mapping
-lab test mapping
-unit conversion mapping
-severity mapping
+Gold answers: *what does the business need?* Eleven datasets built only from trusted Silver
+data, modelled around how clinical operations teams actually monitor a trial.
 
-All tested conflict queries returned:
+| Dataset | Question it answers |
+|---|---|
+| `gold_subject_spine` | One analytical row per subject, the join backbone for everything else |
+| `gold_subject_summary` | Subject-level roll-up of visits, labs and safety activity |
+| `gold_subject_disposition` | Where subjects stand: screened, enrolled, randomised, discontinued, completed |
+| `gold_discontinuation_reasons` | Why subjects leave, by study and site |
+| `gold_enrollment_timeseries` | Enrolment curve over time — actual vs expected pace |
+| `gold_site_performance` | Site-level enrolment, retention, data quality and activity |
+| `gold_visit_compliance` | Protocol adherence: completed, missed, out-of-window visits |
+| `gold_safety_metrics` | AE counts and rates by study, site, severity and seriousness |
+| `gold_lab_monitoring` | Abnormal laboratory findings and source-vs-derived flag discrepancies |
+| `gold_data_quality_metrics` | DQ rule trigger rates by entity and rule |
+| `gold_reconciliation` | Bronze → Silver → quarantine record balance per entity |
 
-0 conflicting mappings
+### Deliberate modelling exclusions
 
-This validates the current use of deterministic aggregation for these reference datasets.
+The platform does not derive variables the source data cannot support:
 
-⸻
+- **TEAE** requires a defensible first-dose timestamp. A randomisation date is not first dose.
+- **SAFFL** should not be read as "received treatment" without exposure data.
+- **Exposure-adjusted AE rates** need a genuine exposure or follow-up denominator.
 
-11. Silver Dimensions and References
+Where CDISC concepts inform the model, datasets are described as *SDTM-inspired* or
+*ADaM-inspired* — not as regulatory-compliant. In place of TEAE, the model uses
+`post_randomization_ae_flag`, which the available data does support.
 
-dimensions.sql produces standardized reference and dimensional entities used by downstream Silver transformations.
+Stating these gaps is the point. Deriving a plausible-looking TEAE flag from a randomisation
+date would be the actual error.
 
-These include entities such as:
+---
 
-ref_sex
-ref_diagnosis
-ref_lab_test
-ref_unit
-ref_severity
-dim_study
-dim_site
-dim_study_arm
-dim_institution
-dim_product
-dim_sponsor
+## 10. Dashboard
 
-These datasets provide trusted lookup structures for the clinical event pipelines.
+`dashboard/Clinical Trial Intelligence & Risk Monitoring.lvdash.json` — a five-page Databricks
+AI/BI dashboard over the Gold layer with global study/site/date filters:
 
-⸻
+1. **Study Overview** — portfolio-level trial status
+2. **Enrolment & Site Performance** — recruitment pace and site comparison
+3. **Patient & Visit Monitoring** — subject disposition and protocol compliance
+4. **Safety & Lab Monitoring** — AE signals and abnormal laboratory findings
+5. **Data Quality & Operational Risk** — DQ rule trigger rates and reconciliation
 
-12. Subject Pipeline
+---
 
-Source:
+## 11. Design proof-of-work
 
-bronze.edc_subjects
+Each clinical entity was investigated before a line of pipeline code was written. The
+exploration notebooks are written as **Question → Purpose → Query → Result → Design
+conclusion**, so the reasoning behind each design decision is reviewable rather than implied.
 
-Target:
+| Notebook | Sections | What it established |
+|---|---:|---|
+| `bronze_ingestion_exploration` | — | Source file inventory, delivery pattern, schema behaviour |
+| `subject_exploration` | 15 | Feed is delta files not snapshots; sequencing field selection; SCD2 justification |
+| `visits_exploration` | 7 | `visit_id` never reissued → append-only, no CDC needed |
+| `lab_results_exploration` | 13 | Unit conversion model; derived vs source abnormality (10,373 disagreements) |
+| `adverse_events_exploration` | 8 | `ae_id` uniqueness; severity spelling variants; severity vs seriousness |
 
-silver.subjects
+These notebooks are the most useful thing in the repository for understanding *why* the
+pipelines look the way they do.
 
-Rejected records:
+---
 
-quarantine.subjects
+## 12. Validation
 
-Source Behavior
+Validation is written independently of transformation logic and lives in `src/validation/`,
+organised by layer. It covers Bronze→Silver reconciliation, business-key uniqueness, SCD
+current-record uniqueness (exactly one `__END_AT IS NULL` row per subject), cross-entity
+referential integrity, reference mapping conflicts, quarantine counts, DQ reason
+distribution, NULL behaviour, and source-vs-standardised measurement behaviour.
 
-Exploration established that the EDC subject feed consists of:
+Counts published in this README come from validation SQL, not from UI-rounded pipeline
+output metrics.
 
-Initial population file
-        +
-Incremental subject change files
+---
 
-The source is therefore not treated as a sequence of complete snapshots.
+## 13. Scope and limitations
 
-⸻
+- **All data is synthetic.** Volumes and distributions are realistic; the records are not real.
+- **Reconciliation gap.** `gold_reconciliation` balances Bronze against Silver + quarantine
+  for every entity except subjects: 3,640 current + 186 quarantined vs 3,829 Bronze rows
+  leaves 3 records unaccounted for. Under investigation; the reconciliation dataset exposes
+  it rather than hiding it.
+- **No delete semantics.** The EDC subject feed carries no delete indicator, so hard-delete
+  handling is not implemented.
+- **Append-only assumption.** Visits, labs and adverse events are treated as append-only
+  based on the observed files. This contract should be re-validated as new files arrive.
+- **Single environment.** No dev/staging/prod separation or CI/CD gating yet.
 
-13. Subject CDC Strategy
+---
 
-Subjects are maintained using:
+## 14. Roadmap
 
-AUTO CDC
-+
-SCD Type 2
+- CI/CD with Databricks Asset Bundles and environment separation
+- Job-level alerting and DQ threshold breach notifications
+- Protocol document intelligence: PDF → embeddings → RAG for protocol-aware analysis
+- Genie natural-language querying over the Gold layer
 
-Business key:
+---
 
-subject_id
+## 15. Running it
 
-Ordering expression:
+Reproducing this requires a Databricks workspace with Unity Catalog and an AWS S3 bucket.
 
-STRUCT(
-    source_snapshot_date,
-    _source_file_name
-)
+1. Create the S3 bucket and upload `data/landing/` to the `Landing/` prefix.
+2. Create Unity Catalog external locations for `Landing/` and `UnityManaged/`; grant
+   `CREATE MANAGED STORAGE` on the managed location.
+3. Run `src/setup/create_schemas.sql` to create the catalog and the four schemas.
+4. Create three Lakeflow pipelines — `clinical-trial-bronze`, `clinical-trial-silver`,
+   `clinical-trial-gold` — pointing at `src/pipelines/bronze`, `silver` and `gold`.
+5. Create a Lakeflow Job with three pipeline tasks chained on all-succeeded dependencies.
+6. Import `dashboard/*.lvdash.json`.
 
-source_snapshot_date is derived from:
+No credentials are stored in this repository. All S3 access is brokered through Unity Catalog.
 
-subjects_YYYYMMDD.csv
+---
 
-The filename is used as a deterministic tie-breaker.
+## 16. Licence
 
-No explicit delete indicator currently exists in the source feed, so hard-delete semantics are not implemented.
-
-⸻
-
-14. Subject SCD Type 2
-
-The subject dimension maintains historical versions of changing subject attributes.
-
-Conceptually:
-
-SUB-001
-│
-├── Version 1
-│
-├── Version 2
-│
-└── Current Version
-
-AUTO CDC maintains SCD Type 2 metadata including:
-
-__START_AT
-__END_AT
-
-Because the sequencing expression is a compound structure, these boundaries represent source-change ordering rather than clinical-event effective dates.
-
-For that reason, clinical dates such as:
-
-visit_date
-collection_date
-onset_date
-
-are not compared directly with these SCD boundaries.
-
-Downstream Silver referential-integrity checks use the current trusted subject version:
-
-__END_AT IS NULL
-
-⸻
-
-15. Subject Data Quality
-
-Subject validation includes rules covering:
-
-missing subject identifier
-missing / unknown study
-missing / unknown site
-site-study inconsistency
-age outside accepted range
-unmappable sex
-unknown baseline diagnosis
-invalid source sequence date
-missing screening date
-enrollment before screening
-consent after enrollment
-randomization before enrollment
-discontinuation before enrollment
-discontinuation before randomization
-invalid subject status
-missing required arm
-unknown study arm
-
-Any blocking failure routes the record to:
-
-quarantine.subjects
-
-The quarantine record retains all DQ failure reasons rather than only the first failure.
-
-⸻
-
-16. Visit Pipeline
-
-Source:
-
-bronze.edc_visits
-
-Target:
-
-silver.visits
-
-Rejected records:
-
-quarantine.visits
-
-Source exploration showed:
-
-18,262 rows
-18,262 distinct visit IDs
-
-No duplicate/reissued visit IDs were observed in the current source files, so the current implementation treats visits as append-oriented.
-
-This assumption should continue to be monitored as additional source files arrive.
-
-⸻
-
-17. Visit Data Quality
-
-Visit validation includes:
-
-business-key validation
-subject existence
-study existence
-site existence
-subject-study consistency
-subject-site consistency
-visit-status validation
-visit-date validation
-
-A missing visit date is not universally invalid.
-
-For example, a missing date can be acceptable for statuses such as:
-
-MISSED
-RESCHEDULED
-
-but a completed visit requires an appropriate visit date.
-
-Referential integrity is evaluated against trusted Silver entities rather than directly against raw Bronze data.
-
-⸻
-
-18. Laboratory Results Pipeline
-
-Source:
-
-bronze.lab_results
-
-Target:
-
-silver.lab_results
-
-Rejected records:
-
-quarantine.lab_results
-
-Exploration identified approximately:
-
-65K laboratory-result records
-
-with no repeated lab_result_id values in the observed source.
-
-⸻
-
-19. Laboratory Unit Standardization
-
-Laboratory measurements can arrive in different units.
-
-Silver standardizes measurements using reference mappings.
-
-The basic transformation is:
-
-standardized_result_value
-        =
-result_value × conversion_factor
-
-The pipeline retains both:
-
-original result
-original unit
-
-and:
-
-standardized result
-standard unit
-
-to preserve source traceability.
-
-⸻
-
-20. Laboratory Reference Ranges
-
-The source-provided reference range is retained for auditability:
-
-source_reference_low
-source_reference_high
-
-A standardized reference range from the laboratory-test reference dataset is used for analytical abnormality classification:
-
-standard_reference_low
-standard_reference_high
-
-This separates:
-
-source-reported clinical context
-
-from:
-
-platform-standardized analytical logic
-
-⸻
-
-21. Derived Laboratory Abnormality
-
-Silver independently derives an abnormality indicator from the standardized measurement:
-
-standardized_result_value < standard_reference_low
-                    OR
-standardized_result_value > standard_reference_high
-
-The original source abnormal flag is retained.
-
-The pipeline therefore supports comparison between:
-
-source_abnormal_flag
-
-and:
-
-derived_abnormal_flag
-
-using an abnormal-flag discrepancy indicator.
-
-This improves auditability rather than silently overwriting the source classification.
-
-⸻
-
-22. Laboratory Data Quality
-
-Blocking laboratory rules include checks for:
-
-missing lab_result_id
-missing subject_id
-missing study_id
-missing visit_id
-missing lab_test_code
-missing result value
-missing result unit
-unknown Silver subject
-subject-study mismatch
-unknown Silver visit
-visit-subject mismatch
-visit-study mismatch
-unknown lab test
-unmapped test/unit combination
-invalid standard reference range
-invalid collection date
-
-Invalid records are routed to:
-
-quarantine.lab_results
-
-⸻
-
-23. Adverse Event Pipeline
-
-Source:
-
-bronze.safety_adverse_events
-
-Target:
-
-silver.adverse_events
-
-Rejected records:
-
-quarantine.adverse_events
-
-Exploration identified approximately:
-
-1,952 adverse-event records
-
-with no duplicate AE identifiers in the observed source.
-
-The current implementation is therefore append-oriented.
-
-⸻
-
-24. Adverse Event Validation
-
-Blocking AE validation includes:
-
-missing AE identifier
-missing subject
-unknown Silver subject
-subject-study mismatch
-subject-site mismatch
-missing study
-missing site
-unknown site
-site-study mismatch
-invalid onset date
-
-Invalid events are routed to:
-
-quarantine.adverse_events
-
-⸻
-
-25. Clinical Warning Flags
-
-Not every unusual clinical relationship should cause data rejection.
-
-Some relationships are therefore retained as warning indicators rather than blocking DQ rules.
-
-Examples include:
-
-severity mapping warning
-resolution before onset warning
-high-severity non-serious warning
-mild serious-event warning
-fatal non-serious warning
-
-This distinction is intentional:
-
-DQ failure
-    → record cannot be trusted structurally
-    → quarantine
-Clinical warning
-    → record may be unusual
-    → retain + flag for review
-
-This avoids incorrectly rejecting potentially legitimate clinical events.
-
-⸻
-
-26. Severity vs Seriousness
-
-Adverse-event severity and regulatory seriousness are treated as separate concepts.
-
-The severity reference currently includes:
-
-Grade 1
-Grade 2
-Grade 3
-Grade 4 – LIFE_THREATENING
-Grade 5 – DEATH
-
-Severity does not automatically determine whether an event is regulatory-serious.
-
-Potential inconsistencies are therefore exposed as warning flags rather than automatically rewriting the source value.
-
-⸻
-
-27. Referential Integrity Strategy
-
-Silver facts do not use raw Bronze entities as their trusted referential-integrity authority.
-
-The relationship is:
-
-Bronze
-   │
-   ▼
-Validated Silver Subject
-   │
-   ├── Visits
-   ├── Laboratory Results
-   └── Adverse Events
-
-This prevents an invalid Bronze subject from legitimizing downstream clinical facts.
-
-⸻
-
-28. Quarantine Architecture
-
-Every major Silver pipeline separates records into:
-
-VALID
-  ↓
-Silver
-INVALID
-  ↓
-Quarantine
-
-Quarantine tables preserve:
-
-original business attributes
-source lineage
-DQ failure array
-human-readable failure reasons
-quarantine timestamp
-
-This provides observability and makes rejected records explainable.
-
-⸻
-
-29. Data Lineage
-
-Operational metadata is preserved through the pipeline where appropriate.
-
-Examples include:
-
-_source_file
-_source_file_name
-_source_file_modification_ts
-_ingestion_ts
-_ingestion_date
-
-This supports:
-
-Silver record
-      ↓
-Bronze record
-      ↓
-Original source file
-
-and improves troubleshooting and auditability.
-
-⸻
-
-30. Unity Catalog Managed Storage
-
-Managed storage has been configured for the medallion schemas.
-
-Logical roots:
-
-Bronze:
-s3://clinical-trial-intelligence-platform-sk/UnityManaged/bronze
-Silver:
-s3://clinical-trial-intelligence-platform-sk/UnityManaged/silver
-Quarantine:
-s3://clinical-trial-intelligence-platform-sk/UnityManaged/quarantine
-Gold:
-s3://clinical-trial-intelligence-platform-sk/UnityManaged/gold
-
-Unity Catalog creates internal managed paths beneath these storage roots using its own __unitystorage hierarchy.
-
-These internal files should not be directly manipulated from S3.
-
-⸻
-
-31. Current Pipeline Result
-
-The Silver Lakeflow pipeline has successfully executed.
-
-Current approximate pipeline outputs are:
-
-subjects             ~3.6K valid source subject changes
-visits               ~18K
-lab_results           ~63K
-adverse_events        ~2K
-
-Subject storage is SCD Type 2, so the physical Silver subject row count must be interpreted as historical versions rather than simply as one row per source subject.
-
-Invalid records are independently available in the corresponding quarantine datasets.
-
-Exact counts are verified through the validation layer rather than relying on UI-rounded pipeline counts.
-
-⸻
-
-32. Validation Strategy
-
-Validation is performed independently from transformation logic.
-
-The validation layer checks areas such as:
-
-Bronze → Silver reconciliation
-business-key uniqueness
-SCD current-record uniqueness
-referential integrity
-reference mapping conflicts
-quarantine counts
-DQ reason distribution
-NULL behavior
-clinical relationship consistency
-source-to-standardized measurement behavior
-
-Reference-conflict checks have already completed successfully.
-
-The next stage is complete Silver post-run validation.
-
-⸻
-
-33. Current Development Status
-
-AWS S3 Landing Zone                  COMPLETE
-        │
-        ▼
-Unity Catalog                       COMPLETE
-        │
-        ▼
-Bronze ingestion                    COMPLETE
-        │
-        ▼
-Bronze validation                   COMPLETE
-        │
-        ▼
-Source exploration                  COMPLETE
-        │
-        ▼
-Silver dimensions/references        COMPLETE
-        │
-        ▼
-Subject SCD2                        COMPLETE
-        │
-        ▼
-Visit pipeline                      COMPLETE
-        │
-        ▼
-Laboratory pipeline                 COMPLETE
-        │
-        ▼
-Adverse-event pipeline              COMPLETE
-        │
-        ▼
-Quarantine framework                COMPLETE
-        │
-        ▼
-Reference conflict validation       COMPLETE
-        │
-        ▼
-Silver pipeline execution           COMPLETE
-        │
-        ▼
-Silver post-run validation          IN PROGRESS
-        │
-        ▼
-Gold analytical layer              NEXT
-        │
-        ▼
-Clinical KPIs / Dashboard           PLANNED
-
-⸻
-
-34. Planned Gold Layer
-
-The Gold layer will expose analytics-ready clinical trial datasets.
-
-Planned areas include:
-
-Subject analytical spine
-Study / site operational metrics
-Enrollment and retention metrics
-Visit compliance
-Adverse-event analytics
-Laboratory abnormality analytics
-Data-quality monitoring
-
-Gold datasets will be derived only from trusted Silver data.
-
-Where CDISC concepts are used, the project will describe datasets as:
-
-SDTM-inspired
-ADaM-inspired
-
-rather than claiming formal regulatory compliance.
-
-⸻
-
-35. Important Clinical Modeling Constraints
-
-The platform intentionally avoids deriving variables when the required source information does not exist.
-
-For example:
-
-TEAE
-
-requires a defensible treatment-start / first-dose timestamp.
-
-A randomization date is not assumed to be equivalent to first dose.
-
-Similarly:
-
-SAFFL
-
-should not be interpreted as “received treatment” unless exposure data supports that conclusion.
-
-Exposure-adjusted adverse-event rates also require an appropriate exposure or follow-up denominator.
-
-These variables will therefore only be introduced when their source requirements are available.
-
-⸻
-
-36. Engineering Principles Demonstrated
-
-This project demonstrates:
-
-* Medallion architecture
-* AWS S3 integration
-* Unity Catalog governance
-* Lakeflow Declarative Pipelines
-* Delta Lake managed tables
-* streaming ingestion
-* CDC processing
-* SCD Type 2 modeling
-* deterministic transformations
-* reusable PySpark utilities
-* schema standardization
-* business-key normalization
-* reference-data management
-* referential integrity
-* clinical data-quality rules
-* quarantine architecture
-* lineage preservation
-* laboratory unit standardization
-* clinical warning flags
-* source-vs-derived reconciliation
-* validation-driven pipeline development
-
-⸻
-
-37. Next Steps
-
-The immediate development sequence is:
-
-1. Complete Silver post-run validation
-              ↓
-2. Reconcile Silver and quarantine outputs
-              ↓
-3. Validate SCD2 subject history
-              ↓
-4. Validate cross-entity referential integrity
-              ↓
-5. Build Gold analytical model
-              ↓
-6. Build clinical operational KPIs
-              ↓
-7. Build analytical dashboard
-              ↓
-8. Add orchestration / monitoring
-              ↓
-9. Add CI/CD and deployment controls
-
-⸻
-
-38. Project Status
-
-Current milestone: Silver Layer Implemented
-
-The platform currently provides a governed and validated transformation path from raw clinical operational data in AWS S3 through Bronze and Silver, including SCD Type 2 subject history, standardized laboratory results, adverse-event validation, referential-integrity controls, and record-level quarantine.
-
-The next milestone is the Gold analytical layer.
-
-One correction I deliberately made in the README: I did **not** state that the `186` shown beside `subjects` in the pipeline UI is the Silver subject row count. In your screenshot, that number can represent update/output metrics in the pipeline UI and should not be used as the definitive physical table count. We'll put exact Silver/quarantine counts into the README **after running the validation SQL**.
-Also, the storage description is accurate: Unity Catalog managed tables remain physically in your AWS account, and schema-level managed locations determine where new managed objects are stored; Unity Catalog creates hashed `__unitystorage` paths underneath the configured storage root.  [oai_citation:0‡Databricks Docs](https://docs.databricks.com/aws/en/connect/unity-catalog/cloud-storage/managed-storage?utm_source=chatgpt.com) AUTO CDC is also the current Databricks API for SCD Type 1/2 processing.  [oai_citation:1‡Databricks Docs](https://docs.databricks.com/gcp/en/ldp/cdc?utm_source=chatgpt.com)
-So after Silver validation, we should update **Section 31 with exact counts**, then start Gold.
+MIT — see [LICENSE](LICENSE).
