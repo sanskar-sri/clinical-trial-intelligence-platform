@@ -1,5 +1,3 @@
-Here is the copy-paste-ready README. I’ve kept current implementation separate from work still in progress, and included the AWS IAM role / trust policy / external ID / Unity Catalog configuration.
-
 Clinical Trial Intelligence Platform
 
 An end-to-end clinical trial data engineering platform built using AWS S3, Databricks, Apache Spark / PySpark, Delta Lake, Unity Catalog, Lakeflow Declarative Pipelines, and Databricks AI/BI.
