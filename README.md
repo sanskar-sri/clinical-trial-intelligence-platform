@@ -1080,7 +1080,7 @@ AI/BI Dashboard
 
 ## 27. Demo
 
-**End-to-end architecture and platform walkthrough** — YouTube: `https://youtu.be/u93M0RE6SAw?si=-M4UhF6xnoGzfmMv`
+**End-to-end architecture and platform walkthrough** — YouTube: `[https://youtu.be/u93M0RE6SAw?si=-M4UhF6xnoGzfmMv]`
 
 The narrated walkthrough demonstrates AWS S3 source architecture, AWS IAM and Unity Catalog integration, Bronze ingestion, Silver standardisation and data quality, quarantine handling, AUTO CDC / SCD Type 2, Gold analytics, Lakeflow orchestration, validation and reconciliation, and the Clinical Trial Intelligence & Risk Monitoring AI/BI dashboard.
 
