@@ -1087,41 +1087,22 @@ dp.create_streaming_table(
 # ============================================================
 
 dp.create_auto_cdc_flow(
+                        target="subjects",
+                        source="v_subjects_valid",
+                        keys=["subject_id"],
+                        sequence_by=F.struct(F.col("source_snapshot_date"),F.col("_source_file_name")),
+                        stored_as_scd_type=2,
+                        except_column_list=[
+                                             "_dq_failures",
+                                             "_is_valid",
+                                             "source_snapshot_date",
+                                             "_source_file_name"],
 
-    target="subjects",
-
-    source="v_subjects_valid",
-
-    keys=[
-        "subject_id"
-    ],
-
-    sequence_by=F.struct(
-        F.col(
-            "source_snapshot_date"
-        ),
-        F.col(
-            "_source_file_name"
-        )
-    ),
-
-    stored_as_scd_type=2,
-
-    except_column_list=[
-        "_dq_failures",
-        "_is_valid",
-        "source_snapshot_date",
-        "_source_file_name"
-    ],
-
-    track_history_except_column_list=[
-        "_source_file",
-        "_source_file_modification_ts",
-        "_ingestion_ts",
-        "_ingestion_date"
-    ]
-)
-
+                         track_history_except_column_list=[
+                                                            "_source_file",
+                                                            "_source_file_modification_ts",
+                                                            "_ingestion_ts",
+                                                            "_ingestion_date"])
 
 # ============================================================
 # 5. SUBJECT QUARANTINE
