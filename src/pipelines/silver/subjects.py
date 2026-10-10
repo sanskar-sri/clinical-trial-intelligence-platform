@@ -130,57 +130,27 @@ BRONZE_SUBJECTS = (
 # 1. VALIDATED SUBJECT STREAM
 # ============================================================
 
-@dp.temporary_view(
-    name="v_subjects_validated"
-)
+@dp.temporary_view(name="v_subjects_validated")
+
 def v_subjects_validated():
 
     # ========================================================
     # BRONZE SOURCE
     # ========================================================
-
-    src = spark.readStream.table(
-        BRONZE_SUBJECTS
-    )
-
+src = spark.readStream.table(BRONZE_SUBJECTS)
 
     # ========================================================
     # REFERENCE: SEX
     # ========================================================
 
-    sex_ref = (
-
-        spark.table("ref_sex")
-
-        .select(
-            F.upper(
-                F.trim(
-                    F.col("raw_sex")
-                )
-            ).alias("_ref_raw_sex"),
-
-            F.upper(
-                F.trim(
-                    F.col("standard_sex")
-                )
-            ).alias("_standard_sex")
-        )
-
-        .where(
-            F.col("_ref_raw_sex").isNotNull()
-            & (F.col("_ref_raw_sex") != "")
-        )
-
-        .groupBy(
-            "_ref_raw_sex"
-        )
-
-        .agg(
-            F.max(
-                "_standard_sex"
-            ).alias("_standard_sex")
-        )
-    )
+sex_ref =(spark.table("ref_sex").select(
+                                        F.upper(F.trim(F.col("raw_sex"))).alias("_ref_raw_sex"),
+                                        F.upper(F.trim(F.col("standard_sex"))).alias("_standard_sex") 
+    
+                                   ).where(F.col("_ref_raw_sex").isNotNull() & (F.col("_ref_raw_sex") != "")
+                                  ).groupBy("_ref_raw_sex")
+                                    .agg(F.max("_standard_sex").alias("_standard_sex"))
+             )
 
 
     # ========================================================
