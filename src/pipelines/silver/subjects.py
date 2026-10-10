@@ -143,51 +143,27 @@ src = spark.readStream.table(BRONZE_SUBJECTS)
     # REFERENCE: SEX
     # ========================================================
 
-sex_ref =(spark.table("ref_sex").select(
-                                        F.upper(F.trim(F.col("raw_sex"))).alias("_ref_raw_sex"),
-                                        F.upper(F.trim(F.col("standard_sex"))).alias("_standard_sex") 
-    
-                                   ).where(F.col("_ref_raw_sex").isNotNull() & (F.col("_ref_raw_sex") != "")
-                                  ).groupBy("_ref_raw_sex")
+sex_ref =(
+            spark.table("ref_sex").select(    F.upper(F.trim(F.col("raw_sex"))).alias("_ref_raw_sex"),
+                                              F.upper(F.trim(F.col("standard_sex"))).alias("_standard_sex")
+                                         )
+                                   .where(F.col("_ref_raw_sex").isNotNull() & (F.col("_ref_raw_sex") != ""))
+                                    .groupBy("_ref_raw_sex")
                                     .agg(F.max("_standard_sex").alias("_standard_sex"))
-             )
-
+          )
 
     # ========================================================
     # REFERENCE: DIAGNOSIS
     # ========================================================
 
-    diagnosis_ref = (
-
-        spark.table("ref_diagnosis")
-
-        .select(
-            F.upper(
-                F.trim(
-                    F.col("diagnosis_code")
-                )
-            ).alias("_dx_code"),
-
-            F.trim(
-                F.col("diagnosis_description")
-            ).alias("baseline_condition")
-        )
-
-        .where(
-            F.col("_dx_code").isNotNull()
-            & (F.col("_dx_code") != "")
-        )
-
-        .groupBy(
-            "_dx_code"
-        )
-
-        .agg(
-            F.max(
-                "baseline_condition"
-            ).alias("baseline_condition")
-        )
-    )
+diagnosis_ref = (
+                  spark.table("ref_diagnosis").select(  F.upper(F.trim(F.col("diagnosis_code"))).alias("_dx_code"),
+                                                        F.trim(F.col("diagnosis_description")).alias("baseline_condition")
+                                                      )
+                                                .where(F.col("_dx_code").isNotNull() & (F.col("_dx_code") != ""))
+                                                .groupBy("_dx_code")
+                                               .agg(F.max("baseline_condition").alias("baseline_condition"))
+                    )
 
 
     # ========================================================
@@ -955,102 +931,60 @@ sex_ref =(spark.table("ref_sex").select(
     # ========================================================
 
     return (
+             enriched.withColumn("_dq_failures",dq_failures)
+                     .withColumn("_is_valid",F.size(F.col("_dq_failures")) == 0)
+                      .select(
+                                "subject_id"
+                                ,"study_id"
+                                ,"site_id"
+                                "screening_date"
+                                "enrollment_date"
+                                "subject_status"
+                                "age"
+                                "sex"
 
-        enriched
+                                "baseline_condition_code",
+                                "baseline_condition",
+                                 "arm_code",
 
-        .withColumn(
-            "_dq_failures",
-            dq_failures
-        )
+                                "randomization_date",
+                                "informed_consent_date",
+                                "discontinuation_date",
+                                "discontinuation_reason",
 
-        .withColumn(
-            "_is_valid",
+                                "source_snapshot_date",
 
-            F.size(
-                F.col(
-                    "_dq_failures"
-                )
-            ) == 0
-        )
+                                 "_source_file",
+                                 "_source_file_name",
+                             "_source_file_modification_ts",
+                                "_ingestion_ts",
+                                "_ingestion_date",
 
-        .select(
-
-            "subject_id",
-            "study_id",
-            "site_id",
-
-            "screening_date",
-            "enrollment_date",
-            "subject_status",
-
-            "age",
-            "sex",
-
-            "baseline_condition_code",
-            "baseline_condition",
-            "arm_code",
-
-            "randomization_date",
-            "informed_consent_date",
-            "discontinuation_date",
-            "discontinuation_reason",
-
-            "source_snapshot_date",
-
-            "_source_file",
-            "_source_file_name",
-            "_source_file_modification_ts",
-            "_ingestion_ts",
-            "_ingestion_date",
-
-            "_dq_failures",
-            "_is_valid"
-        )
-    )
-
+                                "_dq_failures",
+                                "_is_valid")
+            )
 
 # ============================================================
 # 2. VALID SUBJECT STREAM
 # ============================================================
 
-@dp.temporary_view(
-    name="v_subjects_valid"
-)
+@dp.temporary_view(name="v_subjects_valid")
 def v_subjects_valid():
-
     return (
-
-        spark.readStream
-        .table(
-            "v_subjects_validated"
-        )
-
-        .where(
-            F.col(
-                "_is_valid"
-            ) == True
-        )
-    )
-
-
+                spark.readStream.table("v_subjects_validated")
+                      .where(F.col("_is_valid") == True)
+            )
+    
 # ============================================================
 # 3. SILVER SUBJECT TARGET
 # ============================================================
 
 dp.create_streaming_table(
-
-    name="subjects",
-
-    comment=(
-        "Validated Silver subject history from the EDC "
-        "incremental change feed, maintained as SCD Type 2."
-    ),
-
-    table_properties={
-        "quality": "silver"
-    }
-)
-
+                             name="subjects"
+                             ,comment=(  "Validated Silver subject history from the EDC "
+                                        "incremental change feed, maintained as SCD Type 2.")
+                             ,table_properties={"quality": "silver"}
+                           )
 
 # ============================================================
 # 4. AUTO CDC — SCD TYPE 2
@@ -1078,51 +1012,16 @@ dp.create_auto_cdc_flow(
 # 5. SUBJECT QUARANTINE
 # ============================================================
 
-@dp.table(
-
-    name=f"{CATALOG}.quarantine.subjects",
-
-    comment=(
-        "Subject records rejected by Silver clinical "
-        "data-quality validation."
-    ),
-
-    table_properties={
-        "quality": "quarantine"
-    }
-)
+@dp.table( name=f"{CATALOG}.quarantine.subjects"
+           ,comment=("Subject records rejected by Silver clinical "
+                      "data-quality validation.")
+           ,table_properties={"quality": "quarantine"}
+          )
 def quarantine_subjects():
-
     return (
-
-        spark.readStream
-        .table(
-            "v_subjects_validated"
-        )
-
-        .where(
-            F.col(
-                "_is_valid"
-            ) == False
-        )
-
-        .withColumn(
-            "dq_failure_reasons",
-
-            F.array_join(
-                F.col(
-                    "_dq_failures"
-                ),
-                ";"
+                spark.readStream.table("v_subjects_validated")
+                     .where(F.col("_is_valid") == False)
+                     .withColumn("dq_failure_reasons",F.array_join(F.col("_dq_failures"),";"))
+                     .withColumn("quarantined_at",F.current_timestamp())
+                     .drop("_is_valid")
             )
-        )
-
-        .withColumn(
-            "quarantined_at",
-            F.current_timestamp()
-        )
-
-        .drop(
-            "_is_valid"
-        )
-    )
