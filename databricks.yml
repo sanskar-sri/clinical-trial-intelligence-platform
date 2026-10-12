@@ -1,1 +1,12 @@
+bundle:
+  name: clinical-trial-intelligence-platform
 
+include:
+  - resources/*.yml
+
+targets:
+  dev:
+    default: true
+    mode: development
+    workspace:
+      host: https://dbc-672c6426-0e7a.cloud.databricks.com
